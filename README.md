@@ -8,11 +8,11 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/paydirt/paydirt-ios", from: "1.0.0")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "1.0.0")
 ]
 ```
 
-Or in Xcode: File → Add Package Dependencies → `https://github.com/paydirt/paydirt-ios`
+Or in Xcode: File → Add Package Dependencies → `https://github.com/Paydirt-AI/paydirt-ios`
 
 ## Quick Start
 
