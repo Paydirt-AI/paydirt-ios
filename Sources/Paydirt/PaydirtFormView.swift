@@ -435,7 +435,8 @@ struct PaydirtFormView_Previews: PreviewProvider {
             id: "preview-form",
             name: "Cancellation Survey",
             type: "cancellation",
-            prompt: "Why did you cancel your subscription?"
+            prompt: "Why did you cancel your subscription?",
+            enabled: true
         )
         let mockApiClient = PaydirtAPIClient(apiKey: "preview-key", baseURL: "https://api.paydirt.ai")
         let viewModel = PaydirtFormViewModel(

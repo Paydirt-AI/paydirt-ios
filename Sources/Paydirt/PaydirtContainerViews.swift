@@ -6,6 +6,7 @@
 import SwiftUI
 
 /// Container for specific form ID
+/// Gracefully handles disabled forms by dismissing without showing any UI
 struct PaydirtFormContainer: View {
     let formId: String
     let userId: String?
@@ -19,29 +20,32 @@ struct PaydirtFormContainer: View {
     @State private var loading = true
     @State private var error: String?
     @State private var isPresented = true
+    @State private var shouldDismiss = false  // For graceful handling of disabled forms
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
+            if !shouldDismiss {
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea()
 
-            if loading {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-            } else if let error = error {
-                PaydirtErrorView(message: error)
-            } else if let form = form {
-                PaydirtFormView(
-                    viewModel: PaydirtFormViewModel(
-                        form: form,
-                        userId: userId,
-                        metadata: metadata,
-                        apiClient: PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
-                    ),
-                    theme: theme,
-                    onCompletion: onCompletion,
-                    onDismiss: dismiss
-                )
+                if loading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                } else if let error = error {
+                    PaydirtErrorView(message: error)
+                } else if let form = form {
+                    PaydirtFormView(
+                        viewModel: PaydirtFormViewModel(
+                            form: form,
+                            userId: userId,
+                            metadata: metadata,
+                            apiClient: PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
+                        ),
+                        theme: theme,
+                        onCompletion: onCompletion,
+                        onDismiss: dismiss
+                    )
+                }
             }
         }
         .opacity(isPresented ? 1 : 0)
@@ -53,7 +57,15 @@ struct PaydirtFormContainer: View {
     private func loadForm() async {
         let client = PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
         do {
-            form = try await client.getForm(formId: formId)
+            let loadedForm = try await client.getForm(formId: formId)
+            if let loadedForm = loadedForm {
+                form = loadedForm
+            } else {
+                // Form is disabled or not found - gracefully dismiss without showing error
+                PaydirtLogger.shared.info("SDK", "Form is disabled or not found, dismissing silently")
+                shouldDismiss = true
+                onCompletion(false)
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -68,6 +80,7 @@ struct PaydirtFormContainer: View {
 }
 
 /// Container for cancellation form (fetches by type)
+/// Gracefully handles disabled forms by dismissing without showing any UI
 struct PaydirtCancellationContainer: View {
     let userId: String?
     let metadata: [String: Any]?
@@ -80,29 +93,32 @@ struct PaydirtCancellationContainer: View {
     @State private var loading = true
     @State private var error: String?
     @State private var isPresented = true
+    @State private var shouldDismiss = false  // For graceful handling of disabled forms
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
+            if !shouldDismiss {
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea()
 
-            if loading {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-            } else if let error = error {
-                PaydirtErrorView(message: error)
-            } else if let form = form {
-                PaydirtFormView(
-                    viewModel: PaydirtFormViewModel(
-                        form: form,
-                        userId: userId,
-                        metadata: metadata,
-                        apiClient: PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
-                    ),
-                    theme: theme,
-                    onCompletion: onCompletion,
-                    onDismiss: dismiss
-                )
+                if loading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                } else if let error = error {
+                    PaydirtErrorView(message: error)
+                } else if let form = form {
+                    PaydirtFormView(
+                        viewModel: PaydirtFormViewModel(
+                            form: form,
+                            userId: userId,
+                            metadata: metadata,
+                            apiClient: PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
+                        ),
+                        theme: theme,
+                        onCompletion: onCompletion,
+                        onDismiss: dismiss
+                    )
+                }
             }
         }
         .opacity(isPresented ? 1 : 0)
@@ -114,7 +130,15 @@ struct PaydirtCancellationContainer: View {
     private func loadForm() async {
         let client = PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
         do {
-            form = try await client.getForm(type: "cancellation")
+            let loadedForm = try await client.getForm(type: "cancellation")
+            if let loadedForm = loadedForm {
+                form = loadedForm
+            } else {
+                // Cancellation form is disabled or not found - gracefully dismiss
+                PaydirtLogger.shared.info("SDK", "Cancellation form is disabled or not found, dismissing silently")
+                shouldDismiss = true
+                onCompletion(false)
+            }
         } catch {
             self.error = error.localizedDescription
         }

@@ -15,7 +15,8 @@ actor PaydirtAPIClient {
     }
 
     /// Fetch form details by ID or type
-    func getForm(formId: String? = nil, type: String? = nil) async throws -> PaydirtForm {
+    /// Returns nil if form is not found or disabled (graceful handling for remote control)
+    func getForm(formId: String? = nil, type: String? = nil) async throws -> PaydirtForm? {
         var urlComponents = URLComponents(string: "\(baseURL)/api/conversation/forms")!
         var queryItems: [URLQueryItem] = []
 
@@ -34,7 +35,17 @@ actor PaydirtAPIClient {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw PaydirtError.apiError("Failed to fetch form")
+        }
+
+        // 404 means form not found or disabled - return nil for graceful handling
+        if httpResponse.statusCode == 404 {
+            PaydirtLogger.shared.info("API", "Form not found or disabled")
+            return nil
+        }
+
+        guard httpResponse.statusCode == 200 else {
             throw PaydirtError.apiError("Failed to fetch form")
         }
 
@@ -156,6 +167,7 @@ struct PaydirtForm: Codable {
     let name: String
     let type: String
     let prompt: String
+    let enabled: Bool?  // Optional for backwards compatibility
 }
 
 struct FollowUpResponse: Codable {
@@ -175,11 +187,15 @@ struct TranscriptionResponse: Codable {
 enum PaydirtError: Error, LocalizedError {
     case apiError(String)
     case notConfigured
+    case formNotFound
+    case formDisabled
 
     var errorDescription: String? {
         switch self {
         case .apiError(let message): return message
         case .notConfigured: return "Paydirt SDK not configured"
+        case .formNotFound: return "Form not found or disabled"
+        case .formDisabled: return "Form is currently disabled"
         }
     }
 }
