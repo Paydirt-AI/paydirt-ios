@@ -1,7 +1,13 @@
 import SwiftUI
+import Paydirt
 
 @main
 struct ExampleApp: App {
+    init() {
+        // Configure Paydirt SDK with Design Test App
+        Paydirt.shared.configure(apiKey: "pk_live_FkAeyJbbdrg1WfG6x1gYm3rF2NL21UVf")
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -10,125 +16,115 @@ struct ExampleApp: App {
 }
 
 struct ContentView: View {
-    @State private var showForm = true
+    @State private var showCancellationForm = false
+    @State private var showCustomForm = false
+    @State private var lastResult: String?
 
     var body: some View {
-        ZStack {
-            Color.gray.opacity(0.3)
-                .ignoresSafeArea()
+        NavigationView {
+            VStack(spacing: 24) {
+                // Header
+                VStack(spacing: 8) {
+                    Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                        .font(.system(size: 60))
+                        .foregroundColor(Color(red: 168/255, green: 153/255, blue: 104/255))
 
-            if showForm {
-                // Mock of PaydirtFormView for design iteration
-                MockFormView()
-            }
-        }
-    }
-}
+                    Text("Paydirt SDK Test")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
 
-// MARK: - Mock Form View (copy of PaydirtFormView for preview)
-struct MockFormView: View {
-    @State private var feedbackText = ""
-    @State private var isRecording = false
-
-    // Theme colors (matching PaydirtTheme defaults)
-    let primaryColor = Color(red: 168/255, green: 153/255, blue: 104/255) // Gold
-    let backgroundColor = Color.white
-    let textColor = Color.black
-    let secondaryTextColor = Color.gray
-
-    var body: some View {
-        VStack(spacing: 20) {
-            // Question
-            Text("Why did you cancel your subscription?")
-                .font(.headline)
-                .fontWeight(.medium)
-                .foregroundColor(textColor)
-                .multilineTextAlignment(.center)
-
-            // Text input area
-            textInputArea
-
-            // Action buttons
-            actionButtons
-        }
-        .padding(30)
-        .background(backgroundColor)
-        .cornerRadius(20)
-        .shadow(radius: 10)
-        .padding(.horizontal, 20)
-    }
-
-    private var textInputArea: some View {
-        ZStack(alignment: .topLeading) {
-            Rectangle()
-                .fill(backgroundColor)
-                .frame(height: 200)
-                .cornerRadius(8)
-
-            TextEditor(text: $feedbackText)
-                .font(.body)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 8)
-
-            if feedbackText.isEmpty {
-                Text("Share your feedback...")
-                    .font(.body)
-                    .foregroundColor(secondaryTextColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 12)
-                    .allowsHitTesting(false)
-            }
-        }
-        .frame(height: 200)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-        )
-    }
-
-    private var actionButtons: some View {
-        HStack {
-            Button(action: {}) {
-                Text("Done")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(textColor)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.gray.opacity(0.3))
-                    )
-            }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                // CURRENT MIC BUTTON - This is what we want to redesign
-                Button(action: {}) {
-                    Image(systemName: "mic.fill")
-                        .foregroundColor(secondaryTextColor)
-                        .frame(width: 40, height: 40)
-                        .overlay(Circle().stroke(Color.gray.opacity(0.3)))
+                    Text("Test voice AI feedback forms")
+                        .foregroundColor(.secondary)
                 }
+                .padding(.top, 40)
 
-                // Send button
-                Button(action: {}) {
-                    Image(systemName: "arrow.up")
+                Spacer()
+
+                // Test buttons
+                VStack(spacing: 16) {
+                    Button(action: {
+                        showCancellationForm = true
+                    }) {
+                        HStack {
+                            Image(systemName: "xmark.circle")
+                            Text("Show Cancellation Form")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color(red: 168/255, green: 153/255, blue: 104/255))
                         .foregroundColor(.white)
-                        .frame(width: 40, height: 40)
-                        .background(feedbackText.isEmpty ? Color.gray.opacity(0.5) : primaryColor)
-                        .clipShape(Circle())
+                        .cornerRadius(12)
+                    }
+
+                    Button(action: {
+                        showCustomForm = true
+                    }) {
+                        HStack {
+                            Image(systemName: "square.and.pencil")
+                            Text("Show Custom Form")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
                 }
+                .padding(.horizontal, 24)
+
+                // Result display
+                if let result = lastResult {
+                    Text(result)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding()
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(8)
+                        .padding(.horizontal, 24)
+                }
+
+                Spacer()
+
+                // Footer
+                VStack(spacing: 4) {
+                    Text("paydirt.ai")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Text("Configure API key in ExampleApp.swift")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.bottom, 20)
             }
+            .navigationBarHidden(true)
+        }
+        .sheet(isPresented: $showCancellationForm) {
+            // Show cancellation form using SDK
+            Paydirt.shared.showCancellationForm(
+                userId: "test-user-123",
+                metadata: ["source": "example_app"],
+                onCompletion: { completed in
+                    showCancellationForm = false
+                    lastResult = completed ? "Form completed" : "Form dismissed"
+                }
+            )
+        }
+        .sheet(isPresented: $showCustomForm) {
+            // Show specific form by ID (Cancel Form from Design Test App)
+            Paydirt.shared.showForm(
+                formId: "b8cad88c-b813-471f-9279-352590a3303b",
+                userId: "test-user-123",
+                metadata: ["source": "example_app"],
+                onCompletion: { completed in
+                    showCustomForm = false
+                    lastResult = completed ? "Form completed" : "Form dismissed"
+                }
+            )
         }
     }
 }
 
 #Preview {
-    ZStack {
-        Color.gray.opacity(0.3)
-            .ignoresSafeArea()
-        MockFormView()
-    }
+    ContentView()
 }
