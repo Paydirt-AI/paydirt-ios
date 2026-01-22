@@ -27,6 +27,9 @@ struct PaydirtFormContainer: View {
             if !shouldDismiss {
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        dismiss()
+                    }
 
                 if loading {
                     ProgressView()
@@ -100,6 +103,9 @@ struct PaydirtCancellationContainer: View {
             if !shouldDismiss {
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        dismiss()
+                    }
 
                 if loading {
                     ProgressView()

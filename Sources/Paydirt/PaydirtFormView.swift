@@ -18,10 +18,11 @@ struct PaydirtFormView: View {
         VStack(spacing: 20) {
             // Question
             Text(viewModel.currentQuestion)
-                .font(.title2)
-                .fontWeight(.bold)
+                .font(.headline)
+                .fontWeight(.medium)
                 .foregroundColor(theme.textColor)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .opacity(viewModel.titleOpacity)
                 .animation(.easeInOut(duration: 0.3), value: viewModel.titleOpacity)
 
@@ -44,7 +45,10 @@ struct PaydirtFormView: View {
             viewModel.onDismiss = onDismiss
         }
         .alert("Microphone Access Required", isPresented: $viewModel.showMicrophoneAlert) {
-            Button("Settings") { viewModel.openSettings() }
+            Button("Settings") {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                viewModel.openSettings()
+            }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Enable microphone access in Settings to use voice feedback.")
@@ -107,7 +111,10 @@ struct PaydirtFormView: View {
 
             Spacer()
 
-            Button(action: viewModel.stopAndProcessRecording) {
+            Button(action: {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                viewModel.stopAndProcessRecording()
+            }) {
                 Image(systemName: "checkmark")
                     .font(.system(size: 28))
                     .foregroundColor(.white)
@@ -136,7 +143,10 @@ struct PaydirtFormView: View {
 
             HStack(spacing: 12) {
                 // Mic button - large, light gray fill, outline icon
-                Button(action: viewModel.startRecording) {
+                Button(action: {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.startRecording()
+                }) {
                     Image(systemName: "mic")
                         .font(.system(size: 28))
                         .foregroundColor(theme.secondaryTextColor)
@@ -147,7 +157,10 @@ struct PaydirtFormView: View {
 
                 // Send button - only shows when text is entered
                 if !viewModel.feedbackText.isEmpty {
-                    Button(action: viewModel.processTextFeedback) {
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        viewModel.processTextFeedback()
+                    }) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 20))
                             .foregroundColor(.white)
@@ -204,7 +217,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         super.init()
 
         // Add initial question to conversation
-        conversation.append(ConversationMessage(role: "assistant", content: form.prompt))
+        conversation.append(ConversationMessage(role: "assistant", content: form.prompt, input_type: nil))
 
         // Setup notification for app foreground
         NotificationCenter.default.addObserver(
@@ -229,7 +242,9 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         guard !feedback.isEmpty else { return }
 
         feedbackText = ""
-        conversation.append(ConversationMessage(role: "user", content: feedback))
+        conversation.append(ConversationMessage(role: "user", content: feedback, input_type: "text"))
+
+        PaydirtLogger.shared.info("Form", "Sending message with \(conversation.count) messages in history")
 
         isLoading = true
         titleOpacity = 0.3
@@ -242,11 +257,15 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                     conversationHistory: conversation
                 )
 
+                PaydirtLogger.shared.info("Form", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
+
                 if response.is_complete {
                     await completeFeedback()
                 } else if let followUp = response.follow_up_question {
-                    conversation.append(ConversationMessage(role: "assistant", content: followUp))
+                    conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
                     await animateQuestionChange(to: followUp)
+                } else {
+                    PaydirtLogger.shared.error("Form", "No follow-up and not complete - unexpected state")
                 }
             } catch {
                 PaydirtLogger.shared.error("Form", "Failed to process feedback: \(error)")
@@ -321,7 +340,10 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         audioRecorder?.stop()
         isRecording = false
 
-        guard let url = recordingURL else { return }
+        guard let url = recordingURL else {
+            PaydirtLogger.shared.error("Audio", "No recording URL available")
+            return
+        }
 
         isLoading = true
         titleOpacity = 0.3
@@ -330,13 +352,15 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             do {
                 // Read audio data
                 let audioData = try Data(contentsOf: url)
+                PaydirtLogger.shared.info("Audio", "Audio data size: \(audioData.count) bytes")
 
                 // Transcribe via Paydirt API (which uses OpenAI Whisper)
                 let transcription = try await apiClient.transcribeAudio(audioData: audioData)
+                PaydirtLogger.shared.info("Audio", "Transcription result: '\(transcription)'")
 
                 if !transcription.isEmpty {
                     // Add to conversation
-                    conversation.append(ConversationMessage(role: "user", content: transcription))
+                    conversation.append(ConversationMessage(role: "user", content: transcription, input_type: "audio"))
 
                     // Get follow-up
                     let response = try await apiClient.sendMessage(
@@ -345,12 +369,16 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                         conversationHistory: conversation
                     )
 
+                    PaydirtLogger.shared.info("Audio", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
+
                     if response.is_complete {
                         await completeFeedback()
                     } else if let followUp = response.follow_up_question {
-                        conversation.append(ConversationMessage(role: "assistant", content: followUp))
+                        conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
                         await animateQuestionChange(to: followUp)
                     }
+                } else {
+                    PaydirtLogger.shared.error("Audio", "Empty transcription returned")
                 }
             } catch {
                 PaydirtLogger.shared.error("Audio", "Transcription failed: \(error)")
@@ -365,13 +393,17 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     }
 
     func completeFeedback() {
+        PaydirtLogger.shared.info("Form", "completeFeedback called, conversation count: \(conversation.count)")
+
         guard conversation.count > 1 else {
+            PaydirtLogger.shared.info("Form", "Not enough messages (\(conversation.count)), dismissing without submit")
             onDismiss?()
             return
         }
 
         Task {
             do {
+                PaydirtLogger.shared.info("Form", "Submitting response for form \(formId)")
                 try await apiClient.submitResponse(
                     formId: formId,
                     userId: userId,

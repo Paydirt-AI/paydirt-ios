@@ -178,6 +178,7 @@ struct FollowUpResponse: Codable {
 struct ConversationMessage: Codable {
     let role: String
     let content: String
+    let input_type: String?  // "text" or "audio", nil for assistant messages
 }
 
 struct TranscriptionResponse: Codable {
