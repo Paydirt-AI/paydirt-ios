@@ -10,7 +10,6 @@ import AVFoundation
 // MARK: - Main Feedback View
 struct PaydirtFormView: View {
     @ObservedObject var viewModel: PaydirtFormViewModel
-    let theme: PaydirtTheme
     let onCompletion: (Bool) -> Void
     let onDismiss: () -> Void
 
@@ -162,22 +161,20 @@ struct PaydirtFormView: View {
     /// Default controls - matches DifferentSDK exactly
     private var defaultControls: some View {
         HStack {
-            // Done button - only shows after first response
-            if viewModel.hasSubmittedResponse {
-                Button(action: {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    viewModel.completeFeedback()
-                }) {
-                    Text("Done")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(Color.white)
-                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                }
+            // Done button to complete feedback session
+            Button(action: {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                viewModel.completeFeedback()
+            }) {
+                Text("Done")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.white)
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
             }
 
             Spacer()
@@ -193,25 +190,24 @@ struct PaydirtFormView: View {
                         .font(.callout)
                         .frame(width: 40, height: 40)
                         .background(Color.white)
-                        .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                        .overlay(Circle().stroke(viewModel.isRecording ? Color.red.opacity(0.3) : Color.gray.opacity(0.3), lineWidth: 1))
                         .clipShape(Circle())
                 }
 
-                // Submit button - checkmark (same for text and voice)
-                // Only shows when there's text to submit
-                if !viewModel.feedbackText.isEmpty {
-                    Button(action: {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        viewModel.processTextFeedback()
-                    }) {
-                        Image(systemName: "checkmark")
-                            .foregroundColor(.white)
-                            .font(.callout)
-                            .frame(width: 40, height: 40)
-                            .background(Color.black)
-                            .clipShape(Circle())
-                    }
+                // Send text feedback button - matches DifferentSDK exactly
+                // Always visible, disabled when empty
+                Button(action: {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.processTextFeedback()
+                }) {
+                    Image(systemName: "arrow.up")
+                        .foregroundColor(.white)
+                        .font(.callout)
+                        .frame(width: 40, height: 40)
+                        .background(!viewModel.feedbackText.isEmpty ? Color.black : Color.gray.opacity(0.5))
+                        .clipShape(Circle())
                 }
+                .disabled(viewModel.feedbackText.isEmpty)
             }
         }
     }
@@ -599,7 +595,6 @@ struct PaydirtFormView_Previews: PreviewProvider {
 
             PaydirtFormView(
                 viewModel: viewModel,
-                theme: PaydirtTheme(),
                 onCompletion: { _ in },
                 onDismiss: {}
             )

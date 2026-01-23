@@ -13,7 +13,6 @@ public final class Paydirt: NSObject {
 
     private var apiKey: String?
     private var baseURL: String = "https://api.paydirt.ai"
-    private var theme: PaydirtTheme = PaydirtTheme()
     private var revenueCatEnabled = false
     private var cancellationFormId: String?
     private var currentUserId: String?
@@ -26,20 +25,15 @@ public final class Paydirt: NSObject {
     /// - Parameters:
     ///   - apiKey: Your Paydirt API key (starts with pk_live_)
     ///   - baseURL: Optional custom API URL (for testing)
-    ///   - theme: Optional custom theme
     public func configure(
         apiKey: String,
-        baseURL: String? = nil,
-        theme: PaydirtTheme? = nil
+        baseURL: String? = nil
     ) {
         self.apiKey = apiKey
         if let baseURL = baseURL {
             self.baseURL = baseURL
         }
-        if let theme = theme {
-            self.theme = theme
-        }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK configured")
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.2.1 configured")
     }
 
     /// Enable automatic RevenueCat integration
@@ -95,7 +89,6 @@ public final class Paydirt: NSObject {
             metadata: metadata,
             apiKey: apiKey,
             baseURL: baseURL,
-            theme: theme,
             onCompletion: onCompletion
         ))
     }
@@ -116,7 +109,6 @@ public final class Paydirt: NSObject {
             metadata: metadata,
             apiKey: apiKey,
             baseURL: baseURL,
-            theme: theme,
             onCompletion: onCompletion
         ))
     }
@@ -183,22 +175,3 @@ extension Paydirt: PurchasesDelegate {
     }
 }
 
-/// Theme configuration for Paydirt UI
-public struct PaydirtTheme {
-    public var primaryColor: Color
-    public var backgroundColor: Color
-    public var textColor: Color
-    public var secondaryTextColor: Color
-
-    public init(
-        primaryColor: Color = Color(red: 0.78, green: 0.65, blue: 0.24), // Gold #C6A53E
-        backgroundColor: Color = .white,
-        textColor: Color = .black,
-        secondaryTextColor: Color = .gray
-    ) {
-        self.primaryColor = primaryColor
-        self.backgroundColor = backgroundColor
-        self.textColor = textColor
-        self.secondaryTextColor = secondaryTextColor
-    }
-}

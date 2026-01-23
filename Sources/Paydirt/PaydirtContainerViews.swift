@@ -14,7 +14,6 @@ struct PaydirtFormContainer: View {
     let metadata: [String: Any]?
     let apiKey: String
     let baseURL: String
-    let theme: PaydirtTheme
     let onCompletion: (Bool) -> Void
 
     @State private var form: PaydirtForm?
@@ -46,7 +45,6 @@ struct PaydirtFormContainer: View {
                     } else if let form = form, let vm = viewModel {
                         PaydirtFormView(
                             viewModel: vm,
-                            theme: theme,
                             onCompletion: onCompletion,
                             onDismiss: dismiss
                         )
@@ -106,7 +104,6 @@ struct PaydirtCancellationContainer: View {
     let metadata: [String: Any]?
     let apiKey: String
     let baseURL: String
-    let theme: PaydirtTheme
     let onCompletion: (Bool) -> Void
 
     @State private var form: PaydirtForm?
@@ -138,7 +135,6 @@ struct PaydirtCancellationContainer: View {
                     } else if let form = form, let vm = viewModel {
                         PaydirtFormView(
                             viewModel: vm,
-                            theme: theme,
                             onCompletion: onCompletion,
                             onDismiss: dismiss
                         )
