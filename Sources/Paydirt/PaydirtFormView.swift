@@ -16,24 +16,23 @@ struct PaydirtFormView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            // Question
+            // Dynamic question title with fade animation
             Text(viewModel.currentQuestion)
                 .font(.headline)
                 .fontWeight(.medium)
-                .foregroundColor(theme.textColor)
+                .foregroundColor(.black)
                 .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
                 .opacity(viewModel.titleOpacity)
                 .animation(.easeInOut(duration: 0.3), value: viewModel.titleOpacity)
 
-            // Text input area
+            // Text input area with loading overlay
             textInputArea
 
-            // Action buttons
+            // Action buttons with conditional display
             actionButtons
         }
         .padding(30)
-        .background(theme.backgroundColor)
+        .background(Color.white)
         .cornerRadius(20)
         .shadow(radius: 10)
         .padding(.horizontal, 20)
@@ -49,123 +48,167 @@ struct PaydirtFormView: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 viewModel.openSettings()
             }
-            Button("Cancel", role: .cancel) { }
+            Button("Cancel", role: .cancel) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
         } message: {
-            Text("Enable microphone access in Settings to use voice feedback.")
+            Text("To use voice feedback, please enable microphone access in Settings > Privacy & Security > Microphone.")
         }
     }
 
+    /// Text input area with placeholder and loading states
     private var textInputArea: some View {
         ZStack(alignment: .topLeading) {
+            // Background rectangle
             Rectangle()
-                .fill(theme.backgroundColor)
+                .fill(Color.white)
                 .frame(height: 200)
                 .cornerRadius(8)
 
+            // Text editor for user input
             TextEditor(text: $viewModel.feedbackText)
                 .font(.body)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 8)
+                .background(Color.clear)
+                .colorScheme(.light)
                 .disabled(viewModel.isLoading)
 
+            // Placeholder text when empty - MUST match TextEditor padding exactly
             if viewModel.feedbackText.isEmpty {
-                Text("Share your feedback...")
+                Text("Please tell us your feedback...")
                     .font(.body)
-                    .foregroundColor(theme.secondaryTextColor)
+                    .foregroundColor(.gray)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 8)
                     .allowsHitTesting(false)
             }
 
+            // Loading overlay during API calls
             if viewModel.isLoading {
                 Rectangle()
-                    .fill(theme.backgroundColor)
+                    .fill(Color.white)
                     .frame(height: 200)
                     .cornerRadius(8)
                     .overlay(
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
+                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                            .scaleEffect(1.2)
                     )
             }
         }
         .frame(height: 200)
     }
 
+    /// Action buttons container with conditional display based on recording state
     private var actionButtons: some View {
-        Group {
+        ZStack {
             if viewModel.isRecording {
-                recordingControls
+                listeningControls
             } else {
                 defaultControls
+            }
+
+            // Audio popup hint (shows temporarily)
+            if viewModel.showVoiceHint && !viewModel.isRecording {
+                audioPopup
             }
         }
         .opacity(viewModel.isLoading ? 0 : 1)
         .disabled(viewModel.isLoading)
     }
 
-    private var recordingControls: some View {
+    /// Controls displayed during audio recording
+    private var listeningControls: some View {
         HStack {
-            Text("Listening...")
-                .font(.subheadline)
-                .foregroundColor(theme.secondaryTextColor)
+            // Cancel recording button
+            Button(action: {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                viewModel.cancelRecording()
+            }) {
+                Image(systemName: "xmark")
+                    .foregroundColor(.black)
+                    .font(.title2)
+                    .frame(width: 40, height: 40)
+                    .background(Color.white)
+                    .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .clipShape(Circle())
+            }
 
             Spacer()
 
+            // Recording status indicator
+            Text("Listening...")
+                .font(.callout)
+                .foregroundColor(.gray)
+
+            Spacer()
+
+            // Complete recording button - checkmark
             Button(action: {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 viewModel.stopAndProcessRecording()
             }) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 28))
                     .foregroundColor(.white)
-                    .frame(width: 80, height: 80)
+                    .font(.title2)
+                    .frame(width: 40, height: 40)
                     .background(Color.black)
                     .clipShape(Circle())
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            // Tap outside checkmark to cancel
-            viewModel.cancelRecording()
-        }
     }
 
+    /// Default controls - matches DifferentSDK exactly
     private var defaultControls: some View {
         HStack {
-            // "Use voice →" hint (left aligned, like "Listening...")
-            if viewModel.showVoiceHint && viewModel.feedbackText.isEmpty {
-                Text("Use voice →")
-                    .font(.subheadline)
-                    .foregroundColor(theme.secondaryTextColor)
+            // Done button - only shows after first response
+            if viewModel.hasSubmittedResponse {
+                Button(action: {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.completeFeedback()
+                }) {
+                    Text("Done")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.white)
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                }
             }
 
             Spacer()
 
-            HStack(spacing: 12) {
-                // Mic button - large, light gray fill, outline icon
+            HStack(spacing: 8) {
+                // Microphone button to start recording
                 Button(action: {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     viewModel.startRecording()
                 }) {
-                    Image(systemName: "mic")
-                        .font(.system(size: 28))
-                        .foregroundColor(theme.secondaryTextColor)
-                        .frame(width: 80, height: 80)
-                        .background(Color.gray.opacity(0.1))
+                    Image(systemName: "mic.fill")
+                        .foregroundColor(.gray)
+                        .font(.callout)
+                        .frame(width: 40, height: 40)
+                        .background(Color.white)
+                        .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
                         .clipShape(Circle())
                 }
 
-                // Send button - only shows when text is entered
+                // Submit button - checkmark (same for text and voice)
+                // Only shows when there's text to submit
                 if !viewModel.feedbackText.isEmpty {
                     Button(action: {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         viewModel.processTextFeedback()
                     }) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 20))
+                        Image(systemName: "checkmark")
                             .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(theme.primaryColor)
+                            .font(.callout)
+                            .frame(width: 40, height: 40)
+                            .background(Color.black)
                             .clipShape(Circle())
                     }
                 }
@@ -173,6 +216,53 @@ struct PaydirtFormView: View {
         }
     }
 
+    /// Audio feature hint popup with speech bubble design
+    private var audioPopup: some View {
+        HStack {
+            Spacer()
+
+            ZStack {
+                Text("Say it with audio!")
+                    .font(.caption)
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.white)
+                    .cornerRadius(16)
+                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    .overlay(
+                        // Speech bubble tail
+                        Triangle()
+                            .fill(Color.white)
+                            .frame(width: 6, height: 4)
+                            .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
+                            .offset(x: 42, y: 13)
+                    )
+            }
+            .offset(x: -15, y: -45)
+
+            Spacer().frame(width: 40)
+        }
+        .onAppear {
+            viewModel.hideAudioPopupAfterDelay()
+        }
+    }
+}
+
+// MARK: - Triangle Shape
+/// Custom shape for creating speech bubble tail in audio popup
+struct Triangle: Shape {
+    /// Creates triangular path for speech bubble pointer
+    /// - Parameter rect: Rectangle bounds for the triangle
+    /// - Returns: Path defining triangle shape
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.closeSubpath()
+        return path
+    }
 }
 
 // MARK: - View Model
@@ -191,6 +281,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var showMicrophoneAlert = false
     @Published var showVoiceHint = true
+    @Published var hasSubmittedResponse = false  // Track if user has submitted at least one response
 
     private let formId: String
     private let userId: String?
@@ -258,6 +349,9 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                 )
 
                 PaydirtLogger.shared.info("Form", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
+
+                // Mark that user has submitted at least one response - show Done button
+                hasSubmittedResponse = true
 
                 if response.is_complete {
                     await completeFeedback()
@@ -371,6 +465,9 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
                     PaydirtLogger.shared.info("Audio", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
 
+                    // Mark that user has submitted at least one response - show Done button
+                    hasSubmittedResponse = true
+
                     if response.is_complete {
                         await completeFeedback()
                     } else if let followUp = response.follow_up_question {
@@ -425,6 +522,18 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         }
     }
 
+    /// Automatically hides audio feature popup after delay
+    func hideAudioPopupAfterDelay() {
+        Task {
+            try? await Task.sleep(nanoseconds: 6_000_000_000) // 6 seconds
+            await MainActor.run {
+                withAnimation {
+                    showVoiceHint = false
+                }
+            }
+        }
+    }
+
     private func animateQuestionChange(to newQuestion: String) async {
         withAnimation(.easeInOut(duration: 0.3)) {
             titleOpacity = 0
@@ -463,27 +572,38 @@ extension PaydirtFormViewModel: AVAudioRecorderDelegate {
 #if DEBUG
 struct PaydirtFormView_Previews: PreviewProvider {
     static var previews: some View {
-        let mockForm = PaydirtForm(
-            id: "preview-form",
-            name: "Cancellation Survey",
-            type: "cancellation",
-            prompt: "Why did you cancel your subscription?",
-            enabled: true
-        )
-        let mockApiClient = PaydirtAPIClient(apiKey: "preview-key", baseURL: "https://api.paydirt.ai")
-        let viewModel = PaydirtFormViewModel(
-            form: mockForm,
-            userId: "preview-user",
-            metadata: nil,
-            apiClient: mockApiClient
-        )
+        ZStack {
+            // Background to simulate app content
+            Color.blue.opacity(0.3)
+                .ignoresSafeArea()
 
-        return PaydirtFormView(
-            viewModel: viewModel,
-            theme: PaydirtTheme(),
-            onCompletion: { _ in },
-            onDismiss: {}
-        )
+            // Overlay matching DifferentSDK
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+
+            // The form
+            let mockForm = PaydirtForm(
+                id: "preview-form",
+                name: "Cancellation Survey",
+                type: "cancellation",
+                prompt: "Why did you cancel your subscription?",
+                enabled: true
+            )
+            let mockApiClient = PaydirtAPIClient(apiKey: "preview-key", baseURL: "https://api.paydirt.ai")
+            let viewModel = PaydirtFormViewModel(
+                form: mockForm,
+                userId: "preview-user",
+                metadata: nil,
+                apiClient: mockApiClient
+            )
+
+            PaydirtFormView(
+                viewModel: viewModel,
+                theme: PaydirtTheme(),
+                onCompletion: { _ in },
+                onDismiss: {}
+            )
+        }
         .previewDisplayName("Form View")
     }
 }
