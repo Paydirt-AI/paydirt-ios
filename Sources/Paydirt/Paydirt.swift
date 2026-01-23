@@ -86,7 +86,7 @@ public final class Paydirt: NSObject {
     ) -> some View {
         guard let apiKey = apiKey else {
             PaydirtLogger.shared.error("SDK", "API key not configured")
-            return AnyView(PaydirtErrorView(message: "SDK not configured"))
+            return AnyView(PaydirtErrorView(message: "SDK not configured", onDismiss: {}))
         }
 
         return AnyView(PaydirtFormContainer(
@@ -108,7 +108,7 @@ public final class Paydirt: NSObject {
         onCompletion: @escaping (Bool) -> Void = { _ in }
     ) -> some View {
         guard let apiKey = apiKey else {
-            return AnyView(PaydirtErrorView(message: "SDK not configured"))
+            return AnyView(PaydirtErrorView(message: "SDK not configured", onDismiss: {}))
         }
 
         return AnyView(PaydirtCancellationContainer(
