@@ -33,7 +33,7 @@ public final class Paydirt: NSObject {
         if let baseURL = baseURL {
             self.baseURL = baseURL
         }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.2.1 configured")
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.2.2 configured")
     }
 
     /// Enable automatic RevenueCat integration
@@ -111,6 +111,47 @@ public final class Paydirt: NSObject {
             baseURL: baseURL,
             onCompletion: onCompletion
         ))
+    }
+
+    /// Present a feedback form directly (handles presentation correctly)
+    /// - Parameters:
+    ///   - formId: The form ID from your Paydirt dashboard
+    ///   - userId: User identifier (e.g., RevenueCat user ID)
+    ///   - metadata: Optional metadata to include with responses
+    ///   - onCompletion: Called when form is completed or dismissed
+    public func presentForm(
+        formId: String,
+        userId: String? = nil,
+        metadata: [String: Any]? = nil,
+        onCompletion: @escaping (Bool) -> Void = { _ in }
+    ) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootViewController = windowScene.windows.first?.rootViewController else {
+            PaydirtLogger.shared.error("SDK", "Could not find root view controller")
+            return
+        }
+
+        let hostingController = UIHostingController(
+            rootView: showForm(
+                formId: formId,
+                userId: userId,
+                metadata: metadata,
+                onCompletion: { completed in
+                    rootViewController.dismiss(animated: true)
+                    onCompletion(completed)
+                }
+            )
+        )
+
+        hostingController.modalPresentationStyle = .overFullScreen
+        hostingController.view.backgroundColor = .clear
+
+        var topController = rootViewController
+        while let presented = topController.presentedViewController {
+            topController = presented
+        }
+
+        topController.present(hostingController, animated: true)
     }
 
     /// Internal method to present cancellation form when RevenueCat detects cancellation
