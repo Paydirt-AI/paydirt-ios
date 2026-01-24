@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.author           = { 'Paydirt' => 'hello@paydirt.ai' }
   s.source           = { :git => 'https://github.com/Paydirt-AI/paydirt-ios.git', :tag => s.version.to_s }
 
-  s.ios.deployment_target = '15.0'
+  s.ios.deployment_target = '16.0'
   s.swift_version    = '5.9'
 
   s.source_files     = 'Sources/Paydirt/**/*.swift'
