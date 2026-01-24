@@ -33,7 +33,7 @@ public final class Paydirt: NSObject {
         if let baseURL = baseURL {
             self.baseURL = baseURL
         }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.2.2 configured")
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.2.3 configured")
     }
 
     /// Enable automatic RevenueCat integration

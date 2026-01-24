@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'Paydirt'
-  s.version          = '1.2.2'
+  s.version          = '1.2.3'
   s.summary          = 'Voice AI feedback SDK for iOS subscription apps'
   s.description      = <<-DESC
     Paydirt captures cancellation feedback with voice or text,
