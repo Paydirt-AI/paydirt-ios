@@ -1,35 +1,30 @@
 import SwiftUI
 import PlaygroundSupport
 
-// Theme colors (matching PaydirtTheme defaults)
-let primaryColor = Color(red: 168/255, green: 153/255, blue: 104/255) // Gold
-let backgroundColor = Color.white
-let textColor = Color.black
-let secondaryTextColor = Color.gray
-
-// MARK: - Mock Form View for Design Preview
-struct MockFormView: View {
+// MARK: - Form Preview (matches DifferentSDK exactly)
+struct FormPreview: View {
     @State private var feedbackText = ""
     @State private var showVoiceHint = true
     @State private var isRecording = false
+    @State private var currentQuestion = "Why did you cancel your subscription?"
 
     var body: some View {
         VStack(spacing: 20) {
-            // Question - now bolder
-            Text("Why did you cancel your subscription?")
-                .font(.title2)
-                .fontWeight(.bold)
-                .foregroundColor(textColor)
+            // Dynamic question title
+            Text(currentQuestion)
+                .font(.headline)
+                .fontWeight(.medium)
+                .foregroundColor(.black)
                 .multilineTextAlignment(.center)
 
-            // Text input area - no border
+            // Text input area
             textInputArea
 
-            // Action buttons - new voice-first design
+            // Action buttons
             actionButtons
         }
         .padding(30)
-        .background(backgroundColor)
+        .background(Color.white)
         .cornerRadius(20)
         .shadow(radius: 10)
         .padding(.horizontal, 20)
@@ -38,45 +33,68 @@ struct MockFormView: View {
     private var textInputArea: some View {
         ZStack(alignment: .topLeading) {
             Rectangle()
-                .fill(backgroundColor)
+                .fill(Color.white)
                 .frame(height: 200)
                 .cornerRadius(8)
 
             if feedbackText.isEmpty {
-                Text("Share your feedback...")
+                Text("Please tell us your feedback...")
                     .font(.body)
-                    .foregroundColor(secondaryTextColor)
+                    .foregroundColor(.gray)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 8)
             }
+
+            TextField("", text: $feedbackText, axis: .vertical)
+                .font(.body)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 8)
         }
         .frame(height: 200)
-        // No border - removed
     }
 
     private var actionButtons: some View {
-        Group {
+        ZStack {
             if isRecording {
-                recordingControls
+                listeningControls
             } else {
                 defaultControls
+            }
+
+            // Audio popup hint
+            if showVoiceHint && !isRecording {
+                audioPopup
             }
         }
     }
 
-    private var recordingControls: some View {
+    private var listeningControls: some View {
         HStack {
-            Text("Listening...")
-                .font(.subheadline)
-                .foregroundColor(secondaryTextColor)
+            // Cancel button
+            Button(action: { isRecording = false }) {
+                Image(systemName: "xmark")
+                    .foregroundColor(.black)
+                    .font(.title2)
+                    .frame(width: 40, height: 40)
+                    .background(Color.white)
+                    .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .clipShape(Circle())
+            }
 
             Spacer()
 
+            Text("Listening...")
+                .font(.callout)
+                .foregroundColor(.gray)
+
+            Spacer()
+
+            // Complete recording button
             Button(action: { isRecording = false }) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 28))
                     .foregroundColor(.white)
-                    .frame(width: 80, height: 80)
+                    .font(.title2)
+                    .frame(width: 40, height: 40)
                     .background(Color.black)
                     .clipShape(Circle())
             }
@@ -85,41 +103,63 @@ struct MockFormView: View {
 
     private var defaultControls: some View {
         HStack {
-            // "Use voice →" hint (left aligned, like "Listening...")
-            if showVoiceHint && feedbackText.isEmpty {
-                Text("Use voice →")
+            // Done button - always visible (matches DifferentSDK)
+            Button(action: {}) {
+                Text("Done")
                     .font(.subheadline)
-                    .foregroundColor(secondaryTextColor)
+                    .fontWeight(.medium)
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.white)
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
             }
 
             Spacer()
 
-            HStack(spacing: 12) {
-                // Large mic button
+            HStack(spacing: 8) {
+                // Microphone button
                 Button(action: {
                     isRecording = true
                     showVoiceHint = false
                 }) {
-                    Image(systemName: "mic")
-                        .font(.system(size: 28))
-                        .foregroundColor(secondaryTextColor)
-                        .frame(width: 80, height: 80)
-                        .background(Color.gray.opacity(0.1))
+                    Image(systemName: "mic.fill")
+                        .foregroundColor(.gray)
+                        .font(.callout)
+                        .frame(width: 40, height: 40)
+                        .background(Color.white)
+                        .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
                         .clipShape(Circle())
                 }
 
-                // Send button - only shows when text is entered
-                if !feedbackText.isEmpty {
-                    Button(action: {}) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 20))
-                            .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(primaryColor)
-                            .clipShape(Circle())
-                    }
+                // Send button - always visible, disabled when empty (matches DifferentSDK)
+                Button(action: {}) {
+                    Image(systemName: "arrow.up")
+                        .foregroundColor(.white)
+                        .font(.callout)
+                        .frame(width: 40, height: 40)
+                        .background(!feedbackText.isEmpty ? Color.black : Color.gray.opacity(0.5))
+                        .clipShape(Circle())
                 }
+                .disabled(feedbackText.isEmpty)
             }
+        }
+    }
+
+    private var audioPopup: some View {
+        HStack {
+            Spacer()
+            Text("Say it with audio!")
+                .font(.caption)
+                .foregroundColor(.black)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.white)
+                .cornerRadius(16)
+                .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                .offset(x: -15, y: -45)
+            Spacer().frame(width: 40)
         }
     }
 }
@@ -127,9 +167,10 @@ struct MockFormView: View {
 // Set up the live view
 let hostView = UIHostingController(rootView:
     ZStack {
-        Color.gray.opacity(0.3)
+        // Semi-transparent overlay (matches DifferentSDK)
+        Color.black.opacity(0.4)
             .ignoresSafeArea()
-        MockFormView()
+        FormPreview()
     }
     .frame(width: 390, height: 700)
 )
