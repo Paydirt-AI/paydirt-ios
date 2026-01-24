@@ -69,6 +69,7 @@ struct PaydirtFormView: View {
                 .font(.body)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 8)
+                .scrollContentBackground(.hidden)  // Remove iOS 16+ gray background
                 .background(Color.clear)
                 .colorScheme(.light)
                 .disabled(viewModel.isLoading)
@@ -79,7 +80,7 @@ struct PaydirtFormView: View {
                     .font(.body)
                     .foregroundColor(.gray)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
+                    .padding(.vertical)  // Match DifferentSDK default padding
                     .allowsHitTesting(false)
             }
 

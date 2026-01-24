@@ -28,13 +28,9 @@ struct PaydirtFormContainer: View {
             if !shouldDismiss {
                 // Background overlay - matches DifferentSDK exactly
                 // Semi-transparent so you can see app behind
+                // No tap gesture - matches DifferentSDK behavior
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
-                    .onTapGesture {
-                        // Tap outside to submit and dismiss (after first response)
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        viewModel?.completeFeedback()
-                    }
 
                 VStack(spacing: 20) {
                     if loading {
@@ -118,13 +114,9 @@ struct PaydirtCancellationContainer: View {
             if !shouldDismiss {
                 // Background overlay - matches DifferentSDK exactly
                 // Semi-transparent so you can see app behind
+                // No tap gesture - matches DifferentSDK behavior
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
-                    .onTapGesture {
-                        // Tap outside to submit and dismiss (after first response)
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        viewModel?.completeFeedback()
-                    }
 
                 VStack(spacing: 20) {
                     if loading {
