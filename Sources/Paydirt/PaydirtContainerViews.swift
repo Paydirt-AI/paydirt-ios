@@ -28,9 +28,12 @@ struct PaydirtFormContainer: View {
             if !shouldDismiss {
                 // Background overlay - matches DifferentSDK exactly
                 // Semi-transparent so you can see app behind
-                // No tap gesture - matches DifferentSDK behavior
+                // Tap gesture dismisses keyboard (improvement over DifferentSDK)
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        dismissKeyboard()
+                    }
 
                 VStack(spacing: 20) {
                     if loading {
@@ -61,9 +64,29 @@ struct PaydirtFormContainer: View {
 
     private func loadForm() async {
         let client = PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
+
+        // Check cache first for instant display
+        if let cachedForm = await FormCache.shared.get(formId: formId) {
+            form = cachedForm
+            await MainActor.run {
+                viewModel = PaydirtFormViewModel(
+                    form: cachedForm,
+                    userId: userId,
+                    metadata: metadata,
+                    apiClient: client
+                )
+            }
+            loading = false
+            PaydirtLogger.shared.debug("SDK", "Form loaded from cache: \(formId)")
+            return
+        }
+
+        // Cache miss - fetch from network
         do {
             let loadedForm = try await client.getForm(formId: formId)
             if let loadedForm = loadedForm {
+                // Cache the form for future use
+                await FormCache.shared.set(form: loadedForm)
                 form = loadedForm
                 // Create ViewModel after form loads
                 await MainActor.run {
@@ -90,6 +113,15 @@ struct PaydirtFormContainer: View {
         withAnimation(.easeInOut(duration: 0.3)) {
             isPresented = false
         }
+        // After animation completes, notify host to remove container
+        // This fixes white screen issue where container stayed presented
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.onCompletion(false)
+        }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 
@@ -114,9 +146,12 @@ struct PaydirtCancellationContainer: View {
             if !shouldDismiss {
                 // Background overlay - matches DifferentSDK exactly
                 // Semi-transparent so you can see app behind
-                // No tap gesture - matches DifferentSDK behavior
+                // Tap gesture dismisses keyboard (improvement over DifferentSDK)
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
+                    .onTapGesture {
+                        dismissKeyboard()
+                    }
 
                 VStack(spacing: 20) {
                     if loading {
@@ -147,9 +182,29 @@ struct PaydirtCancellationContainer: View {
 
     private func loadForm() async {
         let client = PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
+
+        // Check cache first for instant display
+        if let cachedForm = await FormCache.shared.get(type: "cancellation") {
+            form = cachedForm
+            await MainActor.run {
+                viewModel = PaydirtFormViewModel(
+                    form: cachedForm,
+                    userId: userId,
+                    metadata: metadata,
+                    apiClient: client
+                )
+            }
+            loading = false
+            PaydirtLogger.shared.debug("SDK", "Cancellation form loaded from cache")
+            return
+        }
+
+        // Cache miss - fetch from network
         do {
             let loadedForm = try await client.getForm(type: "cancellation")
             if let loadedForm = loadedForm {
+                // Cache the form for future use
+                await FormCache.shared.set(form: loadedForm)
                 form = loadedForm
                 // Create ViewModel after form loads
                 await MainActor.run {
@@ -176,6 +231,15 @@ struct PaydirtCancellationContainer: View {
         withAnimation(.easeInOut(duration: 0.3)) {
             isPresented = false
         }
+        // After animation completes, notify host to remove container
+        // This fixes white screen issue where container stayed presented
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.onCompletion(false)
+        }
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 

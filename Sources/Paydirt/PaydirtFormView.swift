@@ -72,10 +72,10 @@ struct PaydirtFormView: View {
                 .scrollContentBackground(.hidden)  // Remove iOS 16+ gray background
                 .background(Color.clear)
                 .colorScheme(.light)
-                .disabled(viewModel.isLoading)
+                .disabled(viewModel.isLoading || viewModel.networkError != nil)
 
             // Placeholder text when empty - MUST match TextEditor padding exactly
-            if viewModel.feedbackText.isEmpty {
+            if viewModel.feedbackText.isEmpty && viewModel.networkError == nil {
                 Text("Please tell us your feedback...")
                     .font(.body)
                     .foregroundColor(.gray)
@@ -96,8 +96,72 @@ struct PaydirtFormView: View {
                             .scaleEffect(1.2)
                     )
             }
+
+            // Error overlay when network error occurs
+            if let errorMessage = viewModel.networkError {
+                errorOverlay(message: errorMessage)
+                    .transition(.opacity)
+            }
         }
         .frame(height: 200)
+        .animation(.easeInOut(duration: 0.3), value: viewModel.networkError)
+    }
+
+    /// Error overlay UI with retry and dismiss options
+    private func errorOverlay(message: String) -> some View {
+        Rectangle()
+            .fill(Color.white)
+            .frame(height: 200)
+            .cornerRadius(8)
+            .overlay(
+                VStack(spacing: 16) {
+                    // Error icon
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 36))
+                        .foregroundColor(.red)
+
+                    // Error message
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+
+                    // Action buttons
+                    HStack(spacing: 16) {
+                        // Try Again button
+                        Button(action: {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            viewModel.retryLastAction()
+                        }) {
+                            Text("Try Again")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Color.black)
+                                .clipShape(RoundedRectangle(cornerRadius: 20))
+                        }
+
+                        // Dismiss button
+                        Button(action: {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            viewModel.dismissWithError()
+                        }) {
+                            Text("Dismiss")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Color.white)
+                                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                                .clipShape(RoundedRectangle(cornerRadius: 20))
+                        }
+                    }
+                }
+            )
     }
 
     /// Action buttons container with conditional display based on recording state
@@ -279,14 +343,17 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     @Published var showMicrophoneAlert = false
     @Published var showVoiceHint = true
     @Published var hasSubmittedResponse = false  // Track if user has submitted at least one response
+    @Published var networkError: String? = nil  // Error message for network failures
 
     private let formId: String
     private let userId: String?
     private let metadata: [String: Any]?
+    private let appContext: String?
     private let apiClient: PaydirtAPIClient
     private var conversation: [ConversationMessage] = []
     private var audioRecorder: AVAudioRecorder?
     private var recordingURL: URL?
+    private var lastAction: (() async -> Void)? = nil  // Store last action for retry
 
     var onCompletion: (([ConversationMessage]) -> Void)?
     var onDismiss: (() -> Void)?
@@ -301,6 +368,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         self.currentQuestion = form.prompt
         self.userId = userId
         self.metadata = metadata
+        self.appContext = metadata?["app_context"] as? String
         self.apiClient = apiClient
         super.init()
 
@@ -337,34 +405,49 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         isLoading = true
         titleOpacity = 0.3
 
+        // Store action for potential retry
+        lastAction = { [weak self] in
+            guard let self = self else { return }
+            await self.executeTextFeedback(feedback: feedback)
+        }
+
         Task {
-            do {
-                let response = try await apiClient.sendMessage(
-                    formId: formId,
-                    message: feedback,
-                    conversationHistory: conversation
-                )
+            await executeTextFeedback(feedback: feedback)
+        }
+    }
 
-                PaydirtLogger.shared.info("Form", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
+    /// Internal method to execute text feedback - separated for retry support
+    private func executeTextFeedback(feedback: String) async {
+        do {
+            let response = try await apiClient.sendMessage(
+                formId: formId,
+                message: feedback,
+                conversationHistory: conversation,
+                appContext: appContext
+            )
 
-                // Mark that user has submitted at least one response - show Done button
-                hasSubmittedResponse = true
+            PaydirtLogger.shared.info("Form", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
 
-                if response.is_complete {
-                    await completeFeedback()
-                } else if let followUp = response.follow_up_question {
-                    conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
-                    await animateQuestionChange(to: followUp)
-                } else {
-                    PaydirtLogger.shared.error("Form", "No follow-up and not complete - unexpected state")
-                }
-            } catch {
-                PaydirtLogger.shared.error("Form", "Failed to process feedback: \(error)")
+            // Mark that user has submitted at least one response - show Done button
+            hasSubmittedResponse = true
+
+            // Always show follow-up question - user controls when to submit via Done button
+            if let followUp = response.follow_up_question {
+                conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
+                await animateQuestionChange(to: followUp)
+            } else {
+                PaydirtLogger.shared.info("Form", "No follow-up question received")
             }
 
-            isLoading = false
-            titleOpacity = 1.0
+            // Clear error state on success
+            networkError = nil
+        } catch {
+            PaydirtLogger.shared.error("Form", "Failed to process feedback: \(error)")
+            networkError = "Unable to send feedback. Please check your connection."
         }
+
+        isLoading = false
+        titleOpacity = 1.0
     }
 
     func startRecording() {
@@ -439,51 +522,71 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         isLoading = true
         titleOpacity = 0.3
 
+        // Store action for potential retry
+        lastAction = { [weak self] in
+            guard let self = self else { return }
+            await self.executeAudioProcessing(url: url)
+        }
+
         Task {
-            do {
-                // Read audio data
-                let audioData = try Data(contentsOf: url)
-                PaydirtLogger.shared.info("Audio", "Audio data size: \(audioData.count) bytes")
+            await executeAudioProcessing(url: url)
+        }
+    }
 
-                // Transcribe via Paydirt API (which uses OpenAI Whisper)
-                let transcription = try await apiClient.transcribeAudio(audioData: audioData)
-                PaydirtLogger.shared.info("Audio", "Transcription result: '\(transcription)'")
-
-                if !transcription.isEmpty {
-                    // Add to conversation
-                    conversation.append(ConversationMessage(role: "user", content: transcription, input_type: "audio"))
-
-                    // Get follow-up
-                    let response = try await apiClient.sendMessage(
-                        formId: formId,
-                        message: transcription,
-                        conversationHistory: conversation
-                    )
-
-                    PaydirtLogger.shared.info("Audio", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
-
-                    // Mark that user has submitted at least one response - show Done button
-                    hasSubmittedResponse = true
-
-                    if response.is_complete {
-                        await completeFeedback()
-                    } else if let followUp = response.follow_up_question {
-                        conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
-                        await animateQuestionChange(to: followUp)
-                    }
-                } else {
-                    PaydirtLogger.shared.error("Audio", "Empty transcription returned")
-                }
-            } catch {
-                PaydirtLogger.shared.error("Audio", "Transcription failed: \(error)")
-            }
-
-            isLoading = false
-            titleOpacity = 1.0
-
-            // Cleanup
+    /// Internal method to execute audio processing - separated for retry support
+    private func executeAudioProcessing(url: URL) async {
+        defer {
+            // Cleanup recording file in all paths
             try? FileManager.default.removeItem(at: url)
         }
+
+        do {
+            // Read audio data
+            let audioData = try Data(contentsOf: url)
+            PaydirtLogger.shared.info("Audio", "Audio data size: \(audioData.count) bytes")
+
+            // Transcribe via Paydirt API (which uses OpenAI Whisper)
+            let transcription = try await apiClient.transcribeAudio(audioData: audioData)
+            PaydirtLogger.shared.info("Audio", "Transcription result: '\(transcription)'")
+
+            if !transcription.isEmpty {
+                // Add to conversation
+                conversation.append(ConversationMessage(role: "user", content: transcription, input_type: "audio"))
+
+                // Get follow-up
+                let response = try await apiClient.sendMessage(
+                    formId: formId,
+                    message: transcription,
+                    conversationHistory: conversation,
+                    appContext: appContext
+                )
+
+                PaydirtLogger.shared.info("Audio", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
+
+                // Mark that user has submitted at least one response - show Done button
+                hasSubmittedResponse = true
+
+                // Always show follow-up question - user controls when to submit via Done button
+                if let followUp = response.follow_up_question {
+                    conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
+                    await animateQuestionChange(to: followUp)
+                } else {
+                    PaydirtLogger.shared.info("Audio", "No follow-up question received")
+                }
+
+                // Clear error state on success
+                networkError = nil
+            } else {
+                PaydirtLogger.shared.error("Audio", "Empty transcription returned")
+                networkError = "Could not understand audio. Please try again."
+            }
+        } catch {
+            PaydirtLogger.shared.error("Audio", "Transcription failed: \(error)")
+            networkError = "Unable to process audio. Please check your connection."
+        }
+
+        isLoading = false
+        titleOpacity = 1.0
     }
 
     func completeFeedback() {
@@ -495,6 +598,18 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             return
         }
 
+        // Create pending submission BEFORE attempting API call
+        let submission = PendingSubmission(
+            formId: formId,
+            userId: userId,
+            conversation: conversation,
+            metadata: metadata
+        )
+
+        // Save to local queue first (guarantees we don't lose it)
+        PendingSubmissionStore.shared.save(submission)
+
+        // Fire-and-forget: Start API call but don't wait for it
         Task {
             do {
                 PaydirtLogger.shared.info("Form", "Submitting response for form \(formId)")
@@ -504,19 +619,40 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                     conversation: conversation,
                     metadata: metadata
                 )
+                // Success - remove from pending queue
+                PendingSubmissionStore.shared.remove(id: submission.id)
                 PaydirtLogger.shared.info("Form", "Feedback submitted successfully")
             } catch {
-                PaydirtLogger.shared.error("Form", "Failed to submit: \(error)")
+                PaydirtLogger.shared.error("Form", "Submission failed, queued for retry: \(error)")
+                // Stays in pending queue for retry on next app launch
             }
-
-            onCompletion?(conversation)
         }
+
+        // Dismiss IMMEDIATELY - don't wait for API call
+        onCompletion?(conversation)
     }
 
     func openSettings() {
         if let url = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(url)
         }
+    }
+
+    /// Retry the last failed action after a network error
+    func retryLastAction() {
+        networkError = nil
+        isLoading = true
+        titleOpacity = 0.3
+
+        Task {
+            await lastAction?()
+        }
+    }
+
+    /// Dismiss the form when user chooses to abandon after an error
+    func dismissWithError() {
+        networkError = nil
+        onDismiss?()
     }
 
     /// Automatically hides audio feature popup after delay
