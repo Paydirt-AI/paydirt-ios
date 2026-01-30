@@ -129,7 +129,8 @@ actor PaydirtAPIClient {
     func sendMessage(
         formId: String,
         message: String,
-        conversationHistory: [ConversationMessage]
+        conversationHistory: [ConversationMessage],
+        appContext: String? = nil
     ) async throws -> FollowUpResponse {
         guard let url = URL(string: "\(baseURL)/api/conversation/message") else {
             throw PaydirtError.invalidURL
@@ -140,7 +141,7 @@ actor PaydirtAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 30
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "form_id": formId,
             "message": message,
             "conversation_history": conversationHistory.map { msg -> [String: Any] in
@@ -151,6 +152,10 @@ actor PaydirtAPIClient {
                 return d
             }
         ]
+
+        if let appContext = appContext, !appContext.isEmpty {
+            body["app_context"] = appContext
+        }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

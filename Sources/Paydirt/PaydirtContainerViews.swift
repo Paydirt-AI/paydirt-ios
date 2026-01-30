@@ -26,13 +26,11 @@ struct PaydirtFormContainer: View {
     var body: some View {
         ZStack {
             if !shouldDismiss {
-                // Background overlay - matches DifferentSDK exactly
-                // Semi-transparent so you can see app behind
-                // Tap gesture dismisses keyboard (improvement over DifferentSDK)
+                // Background overlay - tap to submit and dismiss
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
                     .onTapGesture {
-                        dismissKeyboard()
+                        submitAndDismiss()
                     }
 
                 VStack(spacing: 20) {
@@ -109,12 +107,16 @@ struct PaydirtFormContainer: View {
         loading = false
     }
 
+    private func submitAndDismiss() {
+        viewModel?.completeFeedback()
+        dismiss()
+    }
+
     private func dismiss() {
         withAnimation(.easeInOut(duration: 0.3)) {
             isPresented = false
         }
         // After animation completes, notify host to remove container
-        // This fixes white screen issue where container stayed presented
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             self.onCompletion(false)
         }
@@ -144,13 +146,11 @@ struct PaydirtCancellationContainer: View {
     var body: some View {
         ZStack {
             if !shouldDismiss {
-                // Background overlay - matches DifferentSDK exactly
-                // Semi-transparent so you can see app behind
-                // Tap gesture dismisses keyboard (improvement over DifferentSDK)
+                // Background overlay - tap to submit and dismiss
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
                     .onTapGesture {
-                        dismissKeyboard()
+                        submitAndDismiss()
                     }
 
                 VStack(spacing: 20) {
@@ -227,12 +227,16 @@ struct PaydirtCancellationContainer: View {
         loading = false
     }
 
+    private func submitAndDismiss() {
+        viewModel?.completeFeedback()
+        dismiss()
+    }
+
     private func dismiss() {
         withAnimation(.easeInOut(duration: 0.3)) {
             isPresented = false
         }
         // After animation completes, notify host to remove container
-        // This fixes white screen issue where container stayed presented
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             self.onCompletion(false)
         }

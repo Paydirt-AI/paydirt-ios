@@ -10,6 +10,7 @@ import AVFoundation
 // MARK: - Main Feedback View
 struct PaydirtFormView: View {
     @ObservedObject var viewModel: PaydirtFormViewModel
+    @FocusState private var isTextEditorFocused: Bool
     let onCompletion: (Bool) -> Void
     let onDismiss: () -> Void
 
@@ -17,7 +18,7 @@ struct PaydirtFormView: View {
         VStack(spacing: 20) {
             // Dynamic question title with fade animation
             Text(viewModel.currentQuestion)
-                .font(.headline)
+                .font(.title2)
                 .fontWeight(.medium)
                 .foregroundColor(.black)
                 .multilineTextAlignment(.center)
@@ -66,6 +67,7 @@ struct PaydirtFormView: View {
 
             // Text editor for user input
             TextEditor(text: $viewModel.feedbackText)
+                .focused($isTextEditorFocused)
                 .font(.body)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 8)
@@ -193,7 +195,7 @@ struct PaydirtFormView: View {
                 Image(systemName: "xmark")
                     .foregroundColor(.black)
                     .font(.title2)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 70, height: 70)
                     .background(Color.white)
                     .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
                     .clipShape(Circle())
@@ -216,93 +218,63 @@ struct PaydirtFormView: View {
                 Image(systemName: "checkmark")
                     .foregroundColor(.white)
                     .font(.title2)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 70, height: 70)
                     .background(Color.black)
                     .clipShape(Circle())
             }
         }
     }
 
-    /// Default controls - matches DifferentSDK exactly
+    /// Default controls - mic only, checkmark when typing
     private var defaultControls: some View {
         HStack {
-            // Done button to complete feedback session
-            Button(action: {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                viewModel.completeFeedback()
-            }) {
-                Text("Done")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.white)
-                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-            }
-
             Spacer()
 
-            HStack(spacing: 8) {
-                // Microphone button to start recording
+            if viewModel.feedbackText.isEmpty {
+                // Microphone button
                 Button(action: {
+                    isTextEditorFocused = false  // Dismiss keyboard before recording
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     viewModel.startRecording()
                 }) {
                     Image(systemName: "mic.fill")
                         .foregroundColor(.gray)
-                        .font(.callout)
-                        .frame(width: 40, height: 40)
+                        .font(.title)
+                        .frame(width: 70, height: 70)
                         .background(Color.white)
-                        .overlay(Circle().stroke(viewModel.isRecording ? Color.red.opacity(0.3) : Color.gray.opacity(0.3), lineWidth: 1))
+                        .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
                         .clipShape(Circle())
                 }
-
-                // Send text feedback button - matches DifferentSDK exactly
-                // Always visible, disabled when empty
+            } else {
+                // Checkmark button to submit
                 Button(action: {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     viewModel.processTextFeedback()
                 }) {
-                    Image(systemName: "arrow.up")
+                    Image(systemName: "checkmark")
                         .foregroundColor(.white)
-                        .font(.callout)
-                        .frame(width: 40, height: 40)
-                        .background(!viewModel.feedbackText.isEmpty ? Color.black : Color.gray.opacity(0.5))
+                        .font(.title)
+                        .frame(width: 70, height: 70)
+                        .background(Color.black)
                         .clipShape(Circle())
                 }
-                .disabled(viewModel.feedbackText.isEmpty)
             }
         }
     }
 
-    /// Audio feature hint popup with speech bubble design
+    /// Audio hint - gray text with arrow pointing to mic
     private var audioPopup: some View {
         HStack {
             Spacer()
-
-            ZStack {
-                Text("Say it with audio!")
-                    .font(.caption)
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white)
-                    .cornerRadius(16)
-                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-                    .overlay(
-                        // Speech bubble tail
-                        Triangle()
-                            .fill(Color.white)
-                            .frame(width: 6, height: 4)
-                            .shadow(color: .black.opacity(0.2), radius: 1, x: 0, y: 1)
-                            .offset(x: 42, y: 13)
-                    )
+            HStack(spacing: 6) {
+                Text("Tap here")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+                Image(systemName: "arrow.right")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
             }
-            .offset(x: -15, y: -45)
-
-            Spacer().frame(width: 40)
+            .padding(.trailing, 80) // Position to left of mic button
         }
         .onAppear {
             viewModel.hideAudioPopupAfterDelay()
@@ -348,6 +320,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     private let formId: String
     private let userId: String?
     private let metadata: [String: Any]?
+    private let appContext: String?
     private let apiClient: PaydirtAPIClient
     private var conversation: [ConversationMessage] = []
     private var audioRecorder: AVAudioRecorder?
@@ -367,6 +340,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         self.currentQuestion = form.prompt
         self.userId = userId
         self.metadata = metadata
+        self.appContext = metadata?["app_context"] as? String
         self.apiClient = apiClient
         super.init()
 
@@ -420,7 +394,8 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             let response = try await apiClient.sendMessage(
                 formId: formId,
                 message: feedback,
-                conversationHistory: conversation
+                conversationHistory: conversation,
+                appContext: appContext
             )
 
             PaydirtLogger.shared.info("Form", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
@@ -554,7 +529,8 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                 let response = try await apiClient.sendMessage(
                     formId: formId,
                     message: transcription,
-                    conversationHistory: conversation
+                    conversationHistory: conversation,
+                    appContext: appContext
                 )
 
                 PaydirtLogger.shared.info("Audio", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")

@@ -4,24 +4,29 @@
 //
 
 import SwiftUI
-import RevenueCat
 
-// MARK: - Delegate Wrapper Class
+#if canImport(RevenueCat)
+import RevenueCat
+#endif
+
+// MARK: - RevenueCat Delegate Wrapper Class
 // This wrapper preserves the host app's existing RevenueCat delegate while
 // allowing Paydirt to also receive callbacks. When RevenueCat sends updates,
 // this wrapper forwards to both the original delegate and Paydirt.
+#if canImport(RevenueCat)
 private class PaydirtPurchasesDelegate: NSObject, PurchasesDelegate {
     weak var originalDelegate: PurchasesDelegate?
     weak var paydirt: Paydirt?
 
     func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
         // Forward to original delegate first (host app's delegate)
-        originalDelegate?.purchases(purchases, receivedUpdated: customerInfo)
+        originalDelegate?.purchases?(purchases, receivedUpdated: customerInfo)
 
         // Then let Paydirt handle it
         paydirt?.handleCustomerInfoUpdate(customerInfo)
     }
 }
+#endif
 
 /// Main interface for Paydirt SDK
 /// Configure with API key, then present feedback forms
@@ -35,7 +40,9 @@ public final class Paydirt: NSObject {
     private var currentUserId: String?
 
     // Strong reference to prevent delegate wrapper from being deallocated
+    #if canImport(RevenueCat)
     private var delegateWrapper: PaydirtPurchasesDelegate?
+    #endif
 
     private override init() {
         super.init()
@@ -103,6 +110,9 @@ public final class Paydirt: NSObject {
         }
     }
 
+    // MARK: - RevenueCat Integration (Optional)
+
+    #if canImport(RevenueCat)
     /// Enable automatic RevenueCat integration
     /// SDK will listen for subscription cancellation events and show appropriate form
     /// - Parameter cancellationFormId: Optional form ID to use (defaults to fetching cancellation type)
@@ -140,6 +150,7 @@ public final class Paydirt: NSObject {
             PaydirtLogger.shared.info("SDK", "RevenueCat integration enabled")
         }
     }
+    #endif
 
     /// Set the current user ID for tracking
     /// - Parameter userId: User identifier (e.g., RevenueCat user ID)
@@ -208,7 +219,7 @@ public final class Paydirt: NSObject {
         userId: String? = nil,
         metadata: [String: Any]? = nil,
         onCompletion: @escaping (Bool) -> Void = { _ in }
-    ) -> some View {
+    ) -> AnyView {
         guard let apiKey = apiKey else {
             PaydirtLogger.shared.error("SDK", "API key not configured")
             return AnyView(PaydirtErrorView(message: "SDK not configured", onDismiss: {}))
@@ -230,7 +241,7 @@ public final class Paydirt: NSObject {
         userId: String? = nil,
         metadata: [String: Any]? = nil,
         onCompletion: @escaping (Bool) -> Void = { _ in }
-    ) -> some View {
+    ) -> AnyView {
         guard let apiKey = apiKey else {
             return AnyView(PaydirtErrorView(message: "SDK not configured", onDismiss: {}))
         }
@@ -320,6 +331,7 @@ public final class Paydirt: NSObject {
 }
 
 // MARK: - RevenueCat Delegate Handling
+#if canImport(RevenueCat)
 extension Paydirt {
     /// Internal method called by PaydirtPurchasesDelegate wrapper when customer info updates
     /// This method handles Paydirt's cancellation detection logic
@@ -372,4 +384,4 @@ extension Paydirt {
         }
     }
 }
-
+#endif
