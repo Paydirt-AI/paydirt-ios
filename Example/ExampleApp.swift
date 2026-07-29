@@ -5,7 +5,7 @@ import Paydirt
 struct ExampleApp: App {
     init() {
         // Configure Paydirt SDK with Design Test App
-        Paydirt.shared.configure(apiKey: "pk_live_FkAeyJbbdrg1WfG6x1gYm3rF2NL21UVf")
+        Paydirt.shared.configure(apiKey: "YOUR_PAYDIRT_API_KEY")
     }
 
     var body: some Scene {
