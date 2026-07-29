@@ -639,12 +639,6 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             return
         }
 
-        // Preserve the final unanswered follow-up, matching DifferentSDK's
-        // one-message transcript while keeping accepted answers durable.
-        if conversation.last?.role == "assistant" {
-            conversation.append(ConversationMessage(role: "user", content: "N/A", input_type: "text"))
-        }
-
         let submission = PendingSubmission(
             id: conversationId,
             formId: formId,

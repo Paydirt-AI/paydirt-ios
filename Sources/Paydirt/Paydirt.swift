@@ -225,7 +225,7 @@ public final class Paydirt: NSObject {
         if let baseURL = baseURL {
             self.baseURL = baseURL
         }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.3.0 configured")
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.3.1 configured")
 
         // Retry any pending submissions from previous sessions
         let apiClient = PaydirtAPIClient(apiKey: apiKey, baseURL: self.baseURL)
