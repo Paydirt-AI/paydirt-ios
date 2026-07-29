@@ -78,6 +78,7 @@ public final class Paydirt: NSObject {
     private var cancellationFormId: String?
     private var trialCancellationFormId: String?
     private var currentUserId: String?
+    private var theme: PaydirtTheme = .automatic
 
     // Strong reference to prevent delegate wrapper from being deallocated
     #if canImport(RevenueCat)
@@ -92,8 +93,17 @@ public final class Paydirt: NSObject {
     // MARK: - Convenience Static API (for one-line setup)
 
     /// Configure the SDK with your Paydirt API key (static convenience API)
-    public static func configure(apiKey: String, baseURL: String? = nil) {
-        shared.configure(apiKey: apiKey, baseURL: baseURL)
+    public static func configure(
+        apiKey: String,
+        baseURL: String? = nil,
+        theme: PaydirtTheme? = nil
+    ) {
+        shared.configure(apiKey: apiKey, baseURL: baseURL, theme: theme)
+    }
+
+    /// Update Paydirt's appearance without reconfiguring the SDK.
+    public static func setTheme(_ theme: PaydirtTheme) {
+        shared.setTheme(theme)
     }
 
     /// Set the current user ID (static convenience API)
@@ -219,13 +229,17 @@ public final class Paydirt: NSObject {
     ///   - baseURL: Optional custom API URL (for testing)
     public func configure(
         apiKey: String,
-        baseURL: String? = nil
+        baseURL: String? = nil,
+        theme: PaydirtTheme? = nil
     ) {
         self.apiKey = apiKey
         if let baseURL = baseURL {
             self.baseURL = baseURL
         }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.3.2 configured")
+        if let theme = theme {
+            self.theme = theme
+        }
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.4.0 configured")
 
         // Retry any pending submissions from previous sessions
         let apiClient = PaydirtAPIClient(apiKey: apiKey, baseURL: self.baseURL)
@@ -319,6 +333,11 @@ public final class Paydirt: NSObject {
         PaydirtLogger.shared.setLogLevel(level)
     }
 
+    /// Update the colors used by subsequently presented Paydirt forms.
+    public func setTheme(_ theme: PaydirtTheme) {
+        self.theme = theme
+    }
+
     /// Pre-fetch forms to enable instant display when shown later
     /// Call this during app startup or SDK configuration for best UX
     /// - Parameters:
@@ -379,7 +398,7 @@ public final class Paydirt: NSObject {
     ) -> AnyView {
         guard let apiKey = apiKey else {
             PaydirtLogger.shared.error("SDK", "API key not configured")
-            return AnyView(PaydirtErrorView(message: "SDK not configured", onDismiss: {}))
+            return AnyView(PaydirtErrorView(message: "SDK not configured", theme: theme, onDismiss: {}))
         }
 
         return AnyView(PaydirtFormContainer(
@@ -388,6 +407,7 @@ public final class Paydirt: NSObject {
             metadata: metadata,
             apiKey: apiKey,
             baseURL: baseURL,
+            theme: theme,
             onSubmission: onSubmission,
             onCompletion: onCompletion
         ))
@@ -402,7 +422,7 @@ public final class Paydirt: NSObject {
         onCompletion: @escaping (Bool) -> Void = { _ in }
     ) -> AnyView {
         guard let apiKey = apiKey else {
-            return AnyView(PaydirtErrorView(message: "SDK not configured", onDismiss: {}))
+            return AnyView(PaydirtErrorView(message: "SDK not configured", theme: theme, onDismiss: {}))
         }
 
         return AnyView(PaydirtCancellationContainer(
@@ -410,6 +430,7 @@ public final class Paydirt: NSObject {
             metadata: metadata,
             apiKey: apiKey,
             baseURL: baseURL,
+            theme: theme,
             onSubmission: onSubmission,
             onCompletion: onCompletion
         ))

@@ -1,7 +1,7 @@
 //
 // PaydirtFormView.swift
 // Voice/text feedback collection UI
-// Based on DifferentSDK with Paydirt API integration
+// Native Paydirt voice/text feedback collection
 //
 
 import SwiftUI
@@ -11,6 +11,7 @@ import AVFoundation
 struct PaydirtFormView: View {
     @ObservedObject var viewModel: PaydirtFormViewModel
     @FocusState private var isTextEditorFocused: Bool
+    let theme: PaydirtTheme
     let onCompletion: (Bool) -> Void
     let onDismiss: () -> Void
 
@@ -20,7 +21,7 @@ struct PaydirtFormView: View {
             Text(viewModel.currentQuestion)
                 .font(.title2)
                 .fontWeight(.medium)
-                .foregroundColor(.black)
+                .foregroundColor(theme.primaryText)
                 .multilineTextAlignment(.center)
                 .opacity(viewModel.titleOpacity)
                 .animation(.easeInOut(duration: 0.3), value: viewModel.titleOpacity)
@@ -32,10 +33,11 @@ struct PaydirtFormView: View {
             actionButtons
         }
         .padding(30)
-        .background(Color.white)
-        .cornerRadius(20)
+        .background(theme.background)
+        .cornerRadius(theme.cornerRadius)
         .shadow(radius: 10)
         .padding(.horizontal, 20)
+        .preferredColorScheme(theme.preferredColorScheme)
         .onAppear {
             viewModel.onCompletion = { _ in
                 onCompletion(true)
@@ -73,7 +75,7 @@ struct PaydirtFormView: View {
         ZStack(alignment: .topLeading) {
             // Background rectangle
             Rectangle()
-                .fill(Color.white)
+                .fill(theme.surface)
                 .frame(height: 200)
                 .cornerRadius(8)
 
@@ -84,28 +86,30 @@ struct PaydirtFormView: View {
                 .padding(.horizontal, 4)
                 .padding(.vertical, 8)
                 .background(Color.clear)
-                .colorScheme(.light)
+                .foregroundColor(theme.primaryText)
                 .disabled(viewModel.isLoading || viewModel.networkError != nil)
+                .accessibilityLabel("Feedback answer")
+                .accessibilityHint("Enter your response to the current question")
 
             // Placeholder text when empty - MUST match TextEditor padding exactly
             if viewModel.feedbackText.isEmpty && viewModel.networkError == nil {
                 Text("Please tell us your feedback...")
                     .font(.body)
-                    .foregroundColor(.gray)
+                    .foregroundColor(theme.secondaryText)
                     .padding(.horizontal, 8)
-                    .padding(.vertical)  // Match DifferentSDK default padding
+                    .padding(.vertical)
                     .allowsHitTesting(false)
             }
 
             // Loading overlay during API calls
             if viewModel.isLoading {
                 Rectangle()
-                    .fill(Color.white)
+                    .fill(theme.surface)
                     .frame(height: 200)
                     .cornerRadius(8)
                     .overlay(
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .gray))
+                            .progressViewStyle(CircularProgressViewStyle(tint: theme.secondaryText))
                             .scaleEffect(1.2)
                     )
             }
@@ -123,7 +127,7 @@ struct PaydirtFormView: View {
     /// Error overlay UI with retry and dismiss options
     private func errorOverlay(message: String) -> some View {
         Rectangle()
-            .fill(Color.white)
+            .fill(theme.surface)
             .frame(height: 200)
             .cornerRadius(8)
             .overlay(
@@ -131,12 +135,12 @@ struct PaydirtFormView: View {
                     // Error icon
                     Image(systemName: "wifi.exclamationmark")
                         .font(.system(size: 36))
-                        .foregroundColor(.red)
+                        .foregroundColor(theme.error)
 
                     // Error message
                     Text(message)
                         .font(.subheadline)
-                        .foregroundColor(.gray)
+                        .foregroundColor(theme.secondaryText)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
 
@@ -150,10 +154,10 @@ struct PaydirtFormView: View {
                             Text("Try Again")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundColor(.white)
+                                .foregroundColor(theme.accentText)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
-                                .background(Color.black)
+                                .background(theme.accent)
                                 .clipShape(RoundedRectangle(cornerRadius: 20))
                         }
 
@@ -165,11 +169,11 @@ struct PaydirtFormView: View {
                             Text("Dismiss")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundColor(.black)
+                                .foregroundColor(theme.primaryText)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 8)
-                                .background(Color.white)
-                                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                                .background(theme.surface)
+                                .overlay(RoundedRectangle(cornerRadius: 20).stroke(theme.border, lineWidth: 1))
                                 .clipShape(RoundedRectangle(cornerRadius: 20))
                         }
                     }
@@ -204,20 +208,21 @@ struct PaydirtFormView: View {
                 viewModel.cancelRecording()
             }) {
                 Image(systemName: "xmark")
-                    .foregroundColor(.black)
+                    .foregroundColor(theme.primaryText)
                     .font(.title2)
                     .frame(width: 70, height: 70)
-                    .background(Color.white)
-                    .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                    .background(theme.surface)
+                    .overlay(Circle().stroke(theme.border, lineWidth: 1))
                     .clipShape(Circle())
             }
+            .accessibilityLabel("Cancel recording")
 
             Spacer()
 
             // Recording status indicator
             Text("Listening...")
                 .font(.callout)
-                .foregroundColor(.gray)
+                .foregroundColor(theme.secondaryText)
 
             Spacer()
 
@@ -227,12 +232,13 @@ struct PaydirtFormView: View {
                 viewModel.stopAndProcessRecording()
             }) {
                 Image(systemName: "checkmark")
-                    .foregroundColor(.white)
+                    .foregroundColor(theme.accentText)
                     .font(.title2)
                     .frame(width: 70, height: 70)
-                    .background(Color.black)
+                    .background(theme.accent)
                     .clipShape(Circle())
             }
+            .accessibilityLabel("Use recording")
         }
     }
 
@@ -249,13 +255,14 @@ struct PaydirtFormView: View {
                     viewModel.startRecording()
                 }) {
                     Image(systemName: "mic.fill")
-                        .foregroundColor(.gray)
+                        .foregroundColor(theme.secondaryText)
                         .font(.title)
                         .frame(width: 70, height: 70)
-                        .background(Color.white)
-                        .overlay(Circle().stroke(Color.gray.opacity(0.5), lineWidth: 1))
+                        .background(theme.surface)
+                        .overlay(Circle().stroke(theme.border, lineWidth: 1))
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Record voice feedback")
             } else {
                 // Checkmark button to submit
                 Button(action: {
@@ -263,12 +270,13 @@ struct PaydirtFormView: View {
                     viewModel.processTextFeedback()
                 }) {
                     Image(systemName: "checkmark")
-                        .foregroundColor(.white)
+                        .foregroundColor(theme.accentText)
                         .font(.title)
                         .frame(width: 70, height: 70)
-                        .background(Color.black)
+                        .background(theme.accent)
                         .clipShape(Circle())
                 }
+                .accessibilityLabel("Submit answer")
             }
         }
     }
@@ -280,10 +288,10 @@ struct PaydirtFormView: View {
             HStack(spacing: 4) {
                 Text("Tap here")
                     .font(.system(size: 20))
-                    .foregroundColor(.gray)
+                    .foregroundColor(theme.secondaryText)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 20))
-                    .foregroundColor(.gray)
+                    .foregroundColor(theme.secondaryText)
             }
             .padding(.trailing, 80) // Position to left of mic button
         }
@@ -630,6 +638,16 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         PaydirtLogger.shared.info("Form", "completeFeedback called, conversation count: \(conversation.count)")
 
         guard !isFinalized else { return }
+
+        // If the user dismisses while text is still in the editor, include
+        // those exact words in the final conversation instead of discarding it.
+        let draft = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !draft.isEmpty {
+            conversation.append(ConversationMessage(role: "user", content: draft, input_type: "text"))
+            feedbackText = ""
+            hasSubmittedResponse = true
+        }
+
         isFinalized = true
 
         guard hasSubmittedResponse else {
@@ -693,6 +711,14 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
         // Dismiss IMMEDIATELY - don't wait for API call
         onCompletion?(conversation)
+    }
+
+    /// Checkpoint accepted turns when the app is interrupted. This deliberately
+    /// does not finalize the response, so Slack still receives only one message
+    /// after an intentional completion or dismissal.
+    func saveProgressForInterruption() {
+        guard !isFinalized else { return }
+        checkpoint(status: "in_progress")
     }
 
     func openSettings() {
@@ -776,7 +802,7 @@ struct PaydirtFormView_Previews: PreviewProvider {
             Color.blue.opacity(0.3)
                 .ignoresSafeArea()
 
-            // Overlay matching DifferentSDK
+            // Preview overlay
             Color.black.opacity(0.4)
                 .ignoresSafeArea()
 
@@ -798,6 +824,7 @@ struct PaydirtFormView_Previews: PreviewProvider {
 
             PaydirtFormView(
                 viewModel: viewModel,
+                theme: .automatic,
                 onCompletion: { _ in },
                 onDismiss: {}
             )

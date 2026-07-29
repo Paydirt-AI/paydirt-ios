@@ -1,7 +1,7 @@
 //
 // PaydirtContainerViews.swift
 // Container views for presenting forms
-// Matches DifferentSDK presentation style exactly
+// Native presentation containers for durable Paydirt conversations
 //
 
 import SwiftUI
@@ -14,6 +14,7 @@ struct PaydirtFormContainer: View {
     let metadata: [String: Any]?
     let apiKey: String
     let baseURL: String
+    let theme: PaydirtTheme
     let onSubmission: ((PaydirtSubmissionResult) -> Void)?
     let onCompletion: (Bool) -> Void
 
@@ -29,7 +30,7 @@ struct PaydirtFormContainer: View {
         ZStack {
             if !shouldDismiss {
                 // Background overlay - tap to submit and dismiss
-                Color.black.opacity(0.4)
+                theme.overlay
                     .ignoresSafeArea()
                     .onTapGesture {
                         submitAndDismiss()
@@ -38,12 +39,13 @@ struct PaydirtFormContainer: View {
                 VStack(spacing: 20) {
                     if loading {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .progressViewStyle(CircularProgressViewStyle(tint: theme.overlayText))
                     } else if let error = error {
-                        PaydirtErrorView(message: error, onDismiss: dismiss)
+                        PaydirtErrorView(message: error, theme: theme, onDismiss: dismiss)
                     } else if form != nil, let vm = viewModel {
                         PaydirtFormView(
                             viewModel: vm,
+                            theme: theme,
                             onCompletion: reportCompletion,
                             onDismiss: dismiss
                         )
@@ -57,8 +59,8 @@ struct PaydirtFormContainer: View {
             await loadForm()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            // Auto-submit when app goes to background
-            viewModel?.completeFeedback()
+            // Preserve accepted turns without treating an interruption as completion.
+            viewModel?.saveProgressForInterruption()
         }
     }
 
@@ -147,6 +149,7 @@ struct PaydirtCancellationContainer: View {
     let metadata: [String: Any]?
     let apiKey: String
     let baseURL: String
+    let theme: PaydirtTheme
     let onSubmission: ((PaydirtSubmissionResult) -> Void)?
     let onCompletion: (Bool) -> Void
 
@@ -162,7 +165,7 @@ struct PaydirtCancellationContainer: View {
         ZStack {
             if !shouldDismiss {
                 // Background overlay - tap to submit and dismiss
-                Color.black.opacity(0.4)
+                theme.overlay
                     .ignoresSafeArea()
                     .onTapGesture {
                         submitAndDismiss()
@@ -171,12 +174,13 @@ struct PaydirtCancellationContainer: View {
                 VStack(spacing: 20) {
                     if loading {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .progressViewStyle(CircularProgressViewStyle(tint: theme.overlayText))
                     } else if let error = error {
-                        PaydirtErrorView(message: error, onDismiss: dismiss)
+                        PaydirtErrorView(message: error, theme: theme, onDismiss: dismiss)
                     } else if form != nil, let vm = viewModel {
                         PaydirtFormView(
                             viewModel: vm,
+                            theme: theme,
                             onCompletion: reportCompletion,
                             onDismiss: dismiss
                         )
@@ -190,8 +194,8 @@ struct PaydirtCancellationContainer: View {
             await loadForm()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            // Auto-submit when app goes to background
-            viewModel?.completeFeedback()
+            // Preserve accepted turns without treating an interruption as completion.
+            viewModel?.saveProgressForInterruption()
         }
     }
 
@@ -273,9 +277,10 @@ struct PaydirtCancellationContainer: View {
     }
 }
 
-/// Error view for SDK issues - matches DifferentSDK ErrorScreen
+/// Error view for SDK configuration and network issues.
 struct PaydirtErrorView: View {
     let message: String
+    let theme: PaydirtTheme
     let onDismiss: () -> Void
 
     var body: some View {
@@ -283,18 +288,18 @@ struct PaydirtErrorView: View {
             // Error icon
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 50))
-                .foregroundColor(.red)
+                .foregroundColor(theme.error)
 
             // Error title
             Text("Configuration Required")
                 .font(.headline)
                 .fontWeight(.semibold)
-                .foregroundColor(.black)
+                .foregroundColor(theme.primaryText)
 
             // Error description
             Text(message)
                 .font(.body)
-                .foregroundColor(.gray)
+                .foregroundColor(theme.secondaryText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
@@ -306,17 +311,18 @@ struct PaydirtErrorView: View {
                 Text("OK")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                    .foregroundColor(.white)
+                    .foregroundColor(theme.accentText)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 10)
-                    .background(Color.black)
+                    .background(theme.accent)
                     .cornerRadius(8)
             }
         }
         .padding(30)
-        .background(Color.white)
-        .cornerRadius(20)
+        .background(theme.background)
+        .cornerRadius(theme.cornerRadius)
         .shadow(radius: 10)
         .padding(.horizontal, 40)
+        .preferredColorScheme(theme.preferredColorScheme)
     }
 }
