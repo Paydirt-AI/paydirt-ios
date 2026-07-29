@@ -8,7 +8,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "1.3.1")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "1.3.2")
 ]
 ```
 
