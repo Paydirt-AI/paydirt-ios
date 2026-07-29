@@ -54,6 +54,18 @@ struct PaydirtFormView: View {
         } message: {
             Text("To use voice feedback, please enable microphone access in Settings > Privacy & Security > Microphone.")
         }
+        .confirmationDialog(
+            "Use voice feedback?",
+            isPresented: $viewModel.showVoiceConsent,
+            titleVisibility: .visible
+        ) {
+            Button("Start Recording") {
+                viewModel.confirmVoiceRecording()
+            }
+            Button("Use Text Instead", role: .cancel) {}
+        } message: {
+            Text("Your recording will be sent to Paydirt and OpenAI for transcription, then deleted after processing. Recording stops automatically after 2 minutes.")
+        }
     }
 
     /// Text input area with placeholder and loading states
@@ -71,7 +83,6 @@ struct PaydirtFormView: View {
                 .font(.body)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 8)
-                .scrollContentBackground(.hidden)  // Remove iOS 16+ gray background
                 .background(Color.clear)
                 .colorScheme(.light)
                 .disabled(viewModel.isLoading || viewModel.networkError != nil)
@@ -242,7 +253,7 @@ struct PaydirtFormView: View {
                         .font(.title)
                         .frame(width: 70, height: 70)
                         .background(Color.white)
-                        .overlay(Circle().stroke(Color.gray.opacity(0.3), lineWidth: 1))
+                        .overlay(Circle().stroke(Color.gray.opacity(0.5), lineWidth: 1))
                         .clipShape(Circle())
                 }
             } else {
@@ -266,18 +277,15 @@ struct PaydirtFormView: View {
     private var audioPopup: some View {
         HStack {
             Spacer()
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Text("Tap here")
-                    .font(.subheadline)
+                    .font(.system(size: 20))
                     .foregroundColor(.gray)
                 Image(systemName: "arrow.right")
-                    .font(.subheadline)
+                    .font(.system(size: 20))
                     .foregroundColor(.gray)
             }
             .padding(.trailing, 80) // Position to left of mic button
-        }
-        .onAppear {
-            viewModel.hideAudioPopupAfterDelay()
         }
     }
 }
@@ -313,6 +321,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     @Published var titleOpacity: Double = 1.0
     @Published var isRecording = false
     @Published var showMicrophoneAlert = false
+    @Published var showVoiceConsent = false
     @Published var showVoiceHint = true
     @Published var hasSubmittedResponse = false  // Track if user has submitted at least one response
     @Published var networkError: String? = nil  // Error message for network failures
@@ -323,9 +332,15 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     private let appContext: String?
     private let apiClient: PaydirtAPIClient
     private var conversation: [ConversationMessage] = []
+    private let conversationId = UUID()
+    private var snapshotVersion = 0
+    private var previousResponseId: String?
     private var audioRecorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var lastAction: (() async -> Void)? = nil  // Store last action for retry
+    private var hasConfirmedVoiceConsent = false
+    private var isFinalized = false
+    private let onSubmission: ((PaydirtSubmissionResult) -> Void)?
 
     var onCompletion: (([ConversationMessage]) -> Void)?
     var onDismiss: (() -> Void)?
@@ -334,7 +349,8 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         form: PaydirtForm,
         userId: String?,
         metadata: [String: Any]?,
-        apiClient: PaydirtAPIClient
+        apiClient: PaydirtAPIClient,
+        onSubmission: ((PaydirtSubmissionResult) -> Void)? = nil
     ) {
         self.formId = form.id
         self.currentQuestion = form.prompt
@@ -342,27 +358,52 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         self.metadata = metadata
         self.appContext = metadata?["app_context"] as? String
         self.apiClient = apiClient
+        self.onSubmission = onSubmission
         super.init()
 
         // Add initial question to conversation
         conversation.append(ConversationMessage(role: "assistant", content: form.prompt, input_type: nil))
+        checkpoint(status: "in_progress")
+    }
 
-        // Setup notification for app foreground
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.checkMicrophonePermission()
+    /// Persist one complete conversation snapshot. Local encrypted storage is
+    /// written synchronously before the best-effort network upsert begins.
+    private func checkpoint(status: String) {
+        snapshotVersion += 1
+        let version = snapshotVersion
+        let snapshot = PendingSubmission(
+            id: conversationId,
+            formId: formId,
+            userId: userId,
+            conversation: conversation,
+            metadata: metadata,
+            status: status,
+            snapshotVersion: version
+        )
+        PendingSubmissionStore.shared.save(snapshot)
+
+        let messages = conversation
+        Task {
+            do {
+                try await apiClient.submitResponse(
+                    submissionId: conversationId,
+                    formId: formId,
+                    userId: userId,
+                    conversation: messages,
+                    metadata: metadata,
+                    status: status,
+                    snapshotVersion: version
+                )
+                if status == "completed" || status == "abandoned" {
+                    PendingSubmissionStore.shared.remove(id: conversationId)
+                }
+            } catch {
+                PaydirtLogger.shared.warning(
+                    "Queue",
+                    "Conversation snapshot remains encrypted for retry: \(conversationId)"
+                )
+            }
         }
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    private func checkMicrophonePermission() {
-        // Just check status, don't request
     }
 
     func processTextFeedback() {
@@ -371,6 +412,8 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
         feedbackText = ""
         conversation.append(ConversationMessage(role: "user", content: feedback, input_type: "text"))
+        hasSubmittedResponse = true
+        checkpoint(status: "in_progress")
 
         PaydirtLogger.shared.info("Form", "Sending message with \(conversation.count) messages in history")
 
@@ -395,17 +438,18 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                 formId: formId,
                 message: feedback,
                 conversationHistory: conversation,
+                previousResponseId: previousResponseId,
                 appContext: appContext
             )
 
+            previousResponseId = response.response_id
+
             PaydirtLogger.shared.info("Form", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
 
-            // Mark that user has submitted at least one response - show Done button
-            hasSubmittedResponse = true
-
-            // Always show follow-up question - user controls when to submit via Done button
-            if let followUp = response.follow_up_question {
+            // Do not add late AI output after the user has already closed the form.
+            if !isFinalized, let followUp = response.follow_up_question {
                 conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
+                checkpoint(status: "in_progress")
                 await animateQuestionChange(to: followUp)
             } else {
                 PaydirtLogger.shared.info("Form", "No follow-up question received")
@@ -423,6 +467,20 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     }
 
     func startRecording() {
+        guard hasConfirmedVoiceConsent else {
+            showVoiceConsent = true
+            return
+        }
+        startRecordingAfterConsent()
+    }
+
+    func confirmVoiceRecording() {
+        hasConfirmedVoiceConsent = true
+        showVoiceConsent = false
+        startRecordingAfterConsent()
+    }
+
+    private func startRecordingAfterConsent() {
         let session = AVAudioSession.sharedInstance()
 
         switch session.recordPermission {
@@ -449,8 +507,8 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
             try session.setActive(true)
 
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let audioURL = documentsPath.appendingPathComponent("paydirt_recording_\(Date().timeIntervalSince1970).m4a")
+            let audioURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("paydirt_recording_\(UUID().uuidString).m4a")
             recordingURL = audioURL
 
             let settings: [String: Any] = [
@@ -463,7 +521,12 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
             audioRecorder = try AVAudioRecorder(url: audioURL, settings: settings)
             audioRecorder?.delegate = self
-            audioRecorder?.record()
+            audioRecorder?.prepareToRecord()
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: audioURL.path
+            )
+            audioRecorder?.record(forDuration: 120)
             isRecording = true
             showVoiceHint = false
             feedbackText = ""
@@ -519,28 +582,30 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
             // Transcribe via Paydirt API (which uses OpenAI Whisper)
             let transcription = try await apiClient.transcribeAudio(audioData: audioData)
-            PaydirtLogger.shared.info("Audio", "Transcription result: '\(transcription)'")
+            PaydirtLogger.shared.info("Audio", "Transcription completed (\(transcription.count) characters)")
 
             if !transcription.isEmpty {
                 // Add to conversation
                 conversation.append(ConversationMessage(role: "user", content: transcription, input_type: "audio"))
+                hasSubmittedResponse = true
+                checkpoint(status: "in_progress")
 
                 // Get follow-up
                 let response = try await apiClient.sendMessage(
                     formId: formId,
                     message: transcription,
                     conversationHistory: conversation,
+                    previousResponseId: previousResponseId,
                     appContext: appContext
                 )
 
+                previousResponseId = response.response_id
+
                 PaydirtLogger.shared.info("Audio", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
 
-                // Mark that user has submitted at least one response - show Done button
-                hasSubmittedResponse = true
-
-                // Always show follow-up question - user controls when to submit via Done button
-                if let followUp = response.follow_up_question {
+                if !isFinalized, let followUp = response.follow_up_question {
                     conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
+                    checkpoint(status: "in_progress")
                     await animateQuestionChange(to: followUp)
                 } else {
                     PaydirtLogger.shared.info("Audio", "No follow-up question received")
@@ -564,32 +629,64 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     func completeFeedback() {
         PaydirtLogger.shared.info("Form", "completeFeedback called, conversation count: \(conversation.count)")
 
-        guard conversation.count > 1 else {
+        guard !isFinalized else { return }
+        isFinalized = true
+
+        guard hasSubmittedResponse else {
             PaydirtLogger.shared.info("Form", "Not enough messages (\(conversation.count)), dismissing without submit")
+            checkpoint(status: "abandoned")
             onDismiss?()
             return
         }
 
-        // Create pending submission BEFORE attempting API call
+        // Preserve the final unanswered follow-up, matching DifferentSDK's
+        // one-message transcript while keeping accepted answers durable.
+        if conversation.last?.role == "assistant" {
+            conversation.append(ConversationMessage(role: "user", content: "N/A", input_type: "text"))
+        }
+
         let submission = PendingSubmission(
+            id: conversationId,
             formId: formId,
             userId: userId,
             conversation: conversation,
-            metadata: metadata
+            metadata: metadata,
+            status: "completed",
+            snapshotVersion: snapshotVersion + 1
         )
+        snapshotVersion = submission.snapshotVersion
 
         // Save to local queue first (guarantees we don't lose it)
         PendingSubmissionStore.shared.save(submission)
+        onSubmission?(PaydirtSubmissionResult(
+            responseId: submission.id.uuidString.lowercased(),
+            formId: formId,
+            userId: userId,
+            messages: conversation.map {
+                PaydirtFeedbackMessage(
+                    role: $0.role,
+                    content: $0.content,
+                    inputType: $0.input_type
+                )
+            },
+            metadata: metadata
+        ))
 
-        // Fire-and-forget: Start API call but don't wait for it
+        let finalConversation = conversation
+
+        // Fire-and-forget: the form dismisses immediately, while the encrypted
+        // snapshot remains until the API and single Slack delivery succeed.
         Task {
             do {
                 PaydirtLogger.shared.info("Form", "Submitting response for form \(formId)")
                 try await apiClient.submitResponse(
+                    submissionId: submission.id,
                     formId: formId,
                     userId: userId,
-                    conversation: conversation,
-                    metadata: metadata
+                    conversation: finalConversation,
+                    metadata: metadata,
+                    status: "completed",
+                    snapshotVersion: submission.snapshotVersion
                 )
                 // Success - remove from pending queue
                 PendingSubmissionStore.shared.remove(id: submission.id)
@@ -624,7 +721,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     /// Dismiss the form when user chooses to abandon after an error
     func dismissWithError() {
         networkError = nil
-        onDismiss?()
+        completeFeedback()
     }
 
     /// Automatically hides audio feature popup after delay
@@ -660,6 +757,9 @@ extension PaydirtFormViewModel: AVAudioRecorderDelegate {
     nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
         Task { @MainActor in
             PaydirtLogger.shared.info("Audio", "Recording finished - Success: \(flag)")
+            if flag && isRecording {
+                stopAndProcessRecording()
+            }
         }
     }
 

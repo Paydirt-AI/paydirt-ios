@@ -14,6 +14,7 @@ struct PaydirtFormContainer: View {
     let metadata: [String: Any]?
     let apiKey: String
     let baseURL: String
+    let onSubmission: ((PaydirtSubmissionResult) -> Void)?
     let onCompletion: (Bool) -> Void
 
     @State private var form: PaydirtForm?
@@ -22,6 +23,7 @@ struct PaydirtFormContainer: View {
     @State private var isPresented = true
     @State private var shouldDismiss = false
     @State private var viewModel: PaydirtFormViewModel?
+    @State private var completionReported = false
 
     var body: some View {
         ZStack {
@@ -39,10 +41,10 @@ struct PaydirtFormContainer: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     } else if let error = error {
                         PaydirtErrorView(message: error, onDismiss: dismiss)
-                    } else if let form = form, let vm = viewModel {
+                    } else if form != nil, let vm = viewModel {
                         PaydirtFormView(
                             viewModel: vm,
-                            onCompletion: onCompletion,
+                            onCompletion: reportCompletion,
                             onDismiss: dismiss
                         )
                     }
@@ -71,7 +73,8 @@ struct PaydirtFormContainer: View {
                     form: cachedForm,
                     userId: userId,
                     metadata: metadata,
-                    apiClient: client
+                    apiClient: client,
+                    onSubmission: onSubmission
                 )
             }
             loading = false
@@ -92,14 +95,15 @@ struct PaydirtFormContainer: View {
                         form: loadedForm,
                         userId: userId,
                         metadata: metadata,
-                        apiClient: client
+                        apiClient: client,
+                        onSubmission: onSubmission
                     )
                 }
             } else {
                 // Form is disabled or not found - gracefully dismiss without showing error
                 PaydirtLogger.shared.info("SDK", "Form is disabled or not found, dismissing silently")
                 shouldDismiss = true
-                onCompletion(false)
+                reportCompletion(false)
             }
         } catch {
             self.error = error.localizedDescription
@@ -108,8 +112,11 @@ struct PaydirtFormContainer: View {
     }
 
     private func submitAndDismiss() {
-        viewModel?.completeFeedback()
-        dismiss()
+        if let viewModel = viewModel {
+            viewModel.completeFeedback()
+        } else {
+            dismiss()
+        }
     }
 
     private func dismiss() {
@@ -118,8 +125,14 @@ struct PaydirtFormContainer: View {
         }
         // After animation completes, notify host to remove container
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.onCompletion(false)
+            self.reportCompletion(false)
         }
+    }
+
+    private func reportCompletion(_ completed: Bool) {
+        guard !completionReported else { return }
+        completionReported = true
+        onCompletion(completed)
     }
 
     private func dismissKeyboard() {
@@ -134,6 +147,7 @@ struct PaydirtCancellationContainer: View {
     let metadata: [String: Any]?
     let apiKey: String
     let baseURL: String
+    let onSubmission: ((PaydirtSubmissionResult) -> Void)?
     let onCompletion: (Bool) -> Void
 
     @State private var form: PaydirtForm?
@@ -142,6 +156,7 @@ struct PaydirtCancellationContainer: View {
     @State private var isPresented = true
     @State private var shouldDismiss = false
     @State private var viewModel: PaydirtFormViewModel?
+    @State private var completionReported = false
 
     var body: some View {
         ZStack {
@@ -159,10 +174,10 @@ struct PaydirtCancellationContainer: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
                     } else if let error = error {
                         PaydirtErrorView(message: error, onDismiss: dismiss)
-                    } else if let form = form, let vm = viewModel {
+                    } else if form != nil, let vm = viewModel {
                         PaydirtFormView(
                             viewModel: vm,
-                            onCompletion: onCompletion,
+                            onCompletion: reportCompletion,
                             onDismiss: dismiss
                         )
                     }
@@ -191,7 +206,8 @@ struct PaydirtCancellationContainer: View {
                     form: cachedForm,
                     userId: userId,
                     metadata: metadata,
-                    apiClient: client
+                    apiClient: client,
+                    onSubmission: onSubmission
                 )
             }
             loading = false
@@ -212,14 +228,15 @@ struct PaydirtCancellationContainer: View {
                         form: loadedForm,
                         userId: userId,
                         metadata: metadata,
-                        apiClient: client
+                        apiClient: client,
+                        onSubmission: onSubmission
                     )
                 }
             } else {
                 // Cancellation form is disabled or not found - gracefully dismiss
                 PaydirtLogger.shared.info("SDK", "Cancellation form is disabled or not found, dismissing silently")
                 shouldDismiss = true
-                onCompletion(false)
+                reportCompletion(false)
             }
         } catch {
             self.error = error.localizedDescription
@@ -228,8 +245,11 @@ struct PaydirtCancellationContainer: View {
     }
 
     private func submitAndDismiss() {
-        viewModel?.completeFeedback()
-        dismiss()
+        if let viewModel = viewModel {
+            viewModel.completeFeedback()
+        } else {
+            dismiss()
+        }
     }
 
     private func dismiss() {
@@ -238,8 +258,14 @@ struct PaydirtCancellationContainer: View {
         }
         // After animation completes, notify host to remove container
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.onCompletion(false)
+            self.reportCompletion(false)
         }
+    }
+
+    private func reportCompletion(_ completed: Bool) {
+        guard !completionReported else { return }
+        completionReported = true
+        onCompletion(completed)
     }
 
     private func dismissKeyboard() {

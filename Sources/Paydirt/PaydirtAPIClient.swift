@@ -130,6 +130,7 @@ actor PaydirtAPIClient {
         formId: String,
         message: String,
         conversationHistory: [ConversationMessage],
+        previousResponseId: String? = nil,
         appContext: String? = nil
     ) async throws -> FollowUpResponse {
         guard let url = URL(string: "\(baseURL)/api/conversation/message") else {
@@ -157,6 +158,10 @@ actor PaydirtAPIClient {
             body["app_context"] = appContext
         }
 
+        if let previousResponseId = previousResponseId, !previousResponseId.isEmpty {
+            body["previous_response_id"] = previousResponseId
+        }
+
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let data = try await withRetry {
@@ -177,12 +182,16 @@ actor PaydirtAPIClient {
         return try JSONDecoder().decode(FollowUpResponse.self, from: data)
     }
 
-    /// Submit completed conversation
+    /// Save the current conversation snapshot. The same submission ID is used
+    /// for every turn and final delivery.
     func submitResponse(
+        submissionId: UUID,
         formId: String,
         userId: String?,
         conversation: [ConversationMessage],
-        metadata: [String: Any]?
+        metadata: [String: Any]?,
+        status: String = "completed",
+        snapshotVersion: Int = 0
     ) async throws {
         guard let url = URL(string: "\(baseURL)/api/responses") else {
             throw PaydirtError.invalidURL
@@ -194,7 +203,10 @@ actor PaydirtAPIClient {
         request.timeoutInterval = 30
 
         var body: [String: Any] = [
+            "idempotency_key": submissionId.uuidString.lowercased(),
             "form_id": formId,
+            "status": status,
+            "snapshot_version": snapshotVersion,
             "conversation": conversation.map { msg -> [String: Any] in
                 var d: [String: Any] = ["role": msg.role, "content": msg.content]
                 if let inputType = msg.input_type {
@@ -223,7 +235,7 @@ actor PaydirtAPIClient {
             if httpResponse.statusCode == 503 || httpResponse.statusCode == 429 {
                 throw HTTPStatusError(statusCode: httpResponse.statusCode, message: "Server temporarily unavailable")
             }
-            guard httpResponse.statusCode == 201 else {
+            guard httpResponse.statusCode == 200 || httpResponse.statusCode == 201 else {
                 throw PaydirtError.apiError("Failed to submit response")
             }
         }
@@ -294,6 +306,7 @@ struct PaydirtForm: Codable {
 struct FollowUpResponse: Codable {
     let follow_up_question: String?
     let is_complete: Bool
+    let response_id: String?
 }
 
 struct ConversationMessage: Codable {
