@@ -14,10 +14,20 @@ struct HTTPStatusError: Error {
 actor PaydirtAPIClient {
     private let apiKey: String
     private let baseURL: String
+    private let bundleIdentifier: String?
 
     init(apiKey: String, baseURL: String) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.bundleIdentifier = Bundle.main.bundleIdentifier
+    }
+
+    private func authorize(_ request: inout URLRequest) {
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("1.4.0", forHTTPHeaderField: "x-paydirt-sdk-version")
+        if let bundleIdentifier, !bundleIdentifier.isEmpty {
+            request.setValue(bundleIdentifier, forHTTPHeaderField: "x-paydirt-bundle-id")
+        }
     }
 
     // MARK: - Retry Logic
@@ -96,7 +106,7 @@ actor PaydirtAPIClient {
             throw PaydirtError.invalidURL
         }
         var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        authorize(&request)
         request.timeoutInterval = 30
 
         let (data, httpResponse) = try await withRetry {
@@ -138,7 +148,7 @@ actor PaydirtAPIClient {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        authorize(&request)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 30
 
@@ -198,7 +208,7 @@ actor PaydirtAPIClient {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        authorize(&request)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 30
 
@@ -250,7 +260,7 @@ actor PaydirtAPIClient {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        authorize(&request)
         request.timeoutInterval = 60  // Longer timeout for audio processing
 
         // Prepare multipart form data

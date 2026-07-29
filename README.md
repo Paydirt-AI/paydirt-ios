@@ -8,7 +8,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "1.3.2")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "1.4.0")
 ]
 ```
 
@@ -20,7 +20,7 @@ Or in Xcode: File → Add Package Dependencies → `https://github.com/Paydirt-A
 import Paydirt
 
 // Initialize with your API key
-Paydirt.shared.configure(apiKey: "your_api_key")
+Paydirt.configure(apiKey: "your_api_key", theme: .automatic)
 
 // Present regular feedback
 Paydirt.presentForm(
@@ -48,8 +48,37 @@ Paydirt.shared.presentForm(
 - Encrypted conversation snapshots saved after every accepted turn
 - One final raw Slack message per completed conversation
 - Trial-versus-paid cancellation routing and RevenueCat product metadata
+- A bundled Apple privacy manifest
+- System-aware light/dark theming plus a public custom theme API
+
+## Theming
+
+Use `.automatic` to inherit system light/dark appearance, `.light` or `.dark`
+for a fixed presentation, or provide app colors:
+
+```swift
+import SwiftUI
+
+Paydirt.configure(
+    apiKey: "your_api_key",
+    theme: PaydirtTheme(
+        background: Color("AppBackground"),
+        surface: Color("AppSurface"),
+        primaryText: Color("AppText"),
+        accent: Color("AppAccent")
+    )
+)
+```
+
+Paydirt 1.4.0 bundles `PrivacyInfo.xcprivacy`. Your app should still describe
+its own data collection and microphone use in its privacy disclosures.
 
 ## RevenueCat cancellation routing
+
+SwiftPM apps should use RevenueCat's official mirror,
+`https://github.com/RevenueCat/purchases-ios-spm.git`. Paydirt uses that same
+package identity so an app can import Paydirt, RevenueCat, and RevenueCatUI
+without a duplicate-package conflict.
 
 ```swift
 import Paydirt

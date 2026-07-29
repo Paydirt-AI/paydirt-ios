@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'Paydirt'
-  s.version          = '1.3.2'
+  s.version          = '1.4.0'
   s.summary          = 'Voice AI feedback SDK for iOS subscription apps'
   s.description      = <<-DESC
     Paydirt captures cancellation feedback with voice or text,
@@ -15,6 +15,7 @@ Pod::Spec.new do |s|
   s.swift_version    = '5.9'
 
   s.source_files     = 'Sources/Paydirt/**/*.swift'
+  s.resource_bundles = { 'Paydirt_Privacy' => ['Sources/Paydirt/Resources/PrivacyInfo.xcprivacy'] }
 
   s.dependency       'RevenueCat', '~> 5.0'
 end
