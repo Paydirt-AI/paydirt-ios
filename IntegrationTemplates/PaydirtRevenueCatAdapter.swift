@@ -5,6 +5,12 @@ import UIKit
 
 /// Copy this file into a RevenueCat host app. The coding agent should call
 /// `start` after both RevenueCat and Paydirt are configured.
+///
+/// This template is source, not a package-version requirement. Keep the host
+/// app's installed RevenueCat version. If that version uses older callback or
+/// model names, adapt this file to the APIs already compiling in the app and
+/// omit unavailable optional metadata. An older RevenueCat version must not
+/// trigger an upgrade or block the cancellation integration.
 final class PaydirtRevenueCatAdapter: NSObject, PurchasesDelegate {
     static let shared = PaydirtRevenueCatAdapter()
 
@@ -14,8 +20,8 @@ final class PaydirtRevenueCatAdapter: NSObject, PurchasesDelegate {
     private var foregroundObserver: NSObjectProtocol?
 
     func start(
-        cancellationFormId: String,
-        trialCancellationFormId: String
+        cancellationFormId: String? = nil,
+        trialCancellationFormId: String? = nil
     ) {
         self.cancellationFormId = cancellationFormId
         self.trialCancellationFormId = trialCancellationFormId

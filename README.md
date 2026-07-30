@@ -19,8 +19,8 @@ Give your coding agent the outcome and placement you want. For example:
 Or for subscriptions:
 
 > Install Paydirt for regular feedback, trial cancellation, and subscription
-> cancellation. Preserve this app's existing subscription provider, connect
-> every form to Slack, build the app, and verify each test path.
+> cancellation. Preserve this app's existing subscription provider and feedback
+> UI, connect every Paydirt form to Slack, build the app, and verify each test path.
 
 The canonical agent workflow is
 [`https://www.paydirt.ai/agents.md`](https://www.paydirt.ai/agents.md). It tells
@@ -53,7 +53,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.0.0")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.0.1")
 ]
 ```
 
@@ -122,7 +122,7 @@ Paydirt.configure(
 )
 ```
 
-Paydirt 2.0.0 bundles `PrivacyInfo.xcprivacy`. Your app should still describe
+Paydirt 2.0 and newer bundle `PrivacyInfo.xcprivacy`. Your app should still describe
 its own data collection and microphone use in its privacy disclosures.
 
 ## Subscription cancellation routing
@@ -148,7 +148,12 @@ Paydirt.enableStoreKitIntegration(
 
 Copy [`PaydirtRevenueCatAdapter.swift`](IntegrationTemplates/PaydirtRevenueCatAdapter.swift)
 into the host target, then start it after RevenueCat and Paydirt are configured.
-Paydirt does not alter the host's RevenueCat dependency or version.
+Paydirt does not alter the host's RevenueCat dependency or version. An older
+RevenueCat version is not a blocker: the coding agent adapts the copied source
+adapter to the customer-info or purchaser-info APIs already used by the app and
+omits optional metadata that version does not expose. If necessary, it calls
+`Paydirt.handleSubscriptionCancellation` from the app's existing confirmed
+RevenueCat cancellation path instead of upgrading RevenueCat.
 
 ```swift
 PaydirtRevenueCatAdapter.shared.start(

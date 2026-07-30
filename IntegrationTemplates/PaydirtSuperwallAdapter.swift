@@ -3,7 +3,7 @@ import Paydirt
 import StoreKit
 import SuperwallKit
 
-/// Copy this file into a Superwall 4.10+ host app. Superwall's customer-info
+/// Copy this file into a Superwall 4.11+ host app. Superwall's customer-info
 /// stream supplies will-renew and trial state without requiring RevenueCat.
 final class PaydirtSuperwallAdapter {
     static let shared = PaydirtSuperwallAdapter()
@@ -13,8 +13,8 @@ final class PaydirtSuperwallAdapter {
     private var trialCancellationFormId: String?
 
     func start(
-        cancellationFormId: String,
-        trialCancellationFormId: String
+        cancellationFormId: String? = nil,
+        trialCancellationFormId: String? = nil
     ) {
         self.cancellationFormId = cancellationFormId
         self.trialCancellationFormId = trialCancellationFormId

@@ -3,6 +3,16 @@
 All notable public SDK changes are documented here. Versions follow semantic
 versioning.
 
+## [2.0.1] - 2026-07-30
+
+### Changed
+
+- Made trial and paid cancellation form identifiers independently optional in
+  the RevenueCat and Superwall host-source bridges.
+- Clarified that agents connect Paydirt to the subscription code and provider
+  APIs already working in the host app.
+- Corrected the full Superwall CustomerInfo bridge requirement to 4.11 or newer.
+
 ## [2.0.0] - 2026-07-29
 
 ### Added
@@ -43,6 +53,7 @@ configuring both SDKs. Native StoreKit and Superwall examples are in the
 
 - Stabilized the agent-installed cancellation feedback pilot.
 
+[2.0.1]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.1
 [2.0.0]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.0
 [1.4.0]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/1.4.0
 [1.3.2]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/1.3.2
