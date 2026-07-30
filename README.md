@@ -1,10 +1,53 @@
 # Paydirt iOS SDK
 
+[![SDK smoke tests](https://github.com/Paydirt-AI/paydirt-ios/actions/workflows/ci.yml/badge.svg)](https://github.com/Paydirt-AI/paydirt-ios/actions/workflows/ci.yml)
+[![Swift 5.9+](https://img.shields.io/badge/Swift-5.9%2B-orange.svg)](https://www.swift.org)
+[![iOS 15+](https://img.shields.io/badge/iOS-15%2B-blue.svg)](https://developer.apple.com/ios/)
+
 Agent-installed voice and text feedback for iOS apps. Manual feedback works in
 every app; cancellation routing supports native StoreKit, RevenueCat,
 Superwall, and app-owned billing flows.
 
-## Installation
+## Install with Codex, Claude Code, or another coding agent
+
+Give your coding agent the outcome and placement you want. For example:
+
+> Install Paydirt in this iOS app. Add a feedback form titled “Export
+> feedback” after a successful export, send completed conversations to my
+> Slack feedback channel, build the app, and give me a test path.
+
+Or for subscriptions:
+
+> Install Paydirt for regular feedback, trial cancellation, and subscription
+> cancellation. Preserve this app's existing subscription provider, connect
+> every form to Slack, build the app, and verify each test path.
+
+The canonical agent workflow is
+[`https://www.paydirt.ai/agents.md`](https://www.paydirt.ai/agents.md). It tells
+the agent to inspect the host app, register Paydirt's MCP server, authenticate
+you, create or reuse the forms, edit the requested in-app locations, preserve
+the existing StoreKit/RevenueCat/Superwall setup, build, and verify the result.
+
+If your agent needs the MCP registration command:
+
+```sh
+# Codex
+codex mcp add paydirt -- npx -y paydirt-mcp@latest
+
+# Claude Code
+claude mcp add paydirt -- npx -y paydirt-mcp@latest
+```
+
+Other MCP hosts can run `npx` with arguments `-y` and
+`paydirt-mcp@latest`. Setup returns an app-scoped public SDK key after browser
+authentication. That key is intentionally safe to embed in the app binary or
+supply through build configuration; never embed Paydirt administrative
+credentials, Slack credentials, or AI-provider secrets.
+
+## Manual Swift Package installation
+
+Use this path when you intentionally want to integrate the SDK without the
+agent workflow.
 
 Add to your `Package.swift`:
 
@@ -16,12 +59,18 @@ dependencies: [
 
 Or in Xcode: File → Add Package Dependencies → `https://github.com/Paydirt-AI/paydirt-ios`
 
-## Quick Start
+For an existing CocoaPods app:
+
+```ruby
+pod 'Paydirt', '~> 2.0'
+```
+
+## Manual quick start
 
 ```swift
 import Paydirt
 
-// Initialize with your API key
+// Initialize with the app-scoped public key returned by Paydirt setup.
 Paydirt.configure(apiKey: "your_api_key", theme: .automatic)
 
 // Present regular feedback
@@ -199,7 +248,9 @@ minutes, and deleted after transcription succeeds or fails.
 
 ## Documentation
 
-See [paydirt.ai](https://paydirt.ai) for full documentation.
+See the [agent installation contract](https://www.paydirt.ai/agents.md),
+[human-readable documentation](https://www.paydirt.ai/docs), and
+[security policy](SECURITY.md).
 
 ## License
 
