@@ -24,7 +24,7 @@ actor PaydirtAPIClient {
 
     private func authorize(_ request: inout URLRequest) {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("1.4.0", forHTTPHeaderField: "x-paydirt-sdk-version")
+        request.setValue("2.0.0", forHTTPHeaderField: "x-paydirt-sdk-version")
         if let bundleIdentifier, !bundleIdentifier.isEmpty {
             request.setValue(bundleIdentifier, forHTTPHeaderField: "x-paydirt-bundle-id")
         }

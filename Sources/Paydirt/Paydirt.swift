@@ -5,10 +5,6 @@
 
 import SwiftUI
 
-#if canImport(RevenueCat)
-import RevenueCat
-#endif
-
 /// A single question or answer captured by Paydirt.
 public struct PaydirtFeedbackMessage {
     public let role: String
@@ -48,24 +44,67 @@ public struct PaydirtSubmissionResult {
     }
 }
 
-// MARK: - RevenueCat Delegate Wrapper Class
-// This wrapper preserves the host app's existing RevenueCat delegate while
-// allowing Paydirt to also receive callbacks. When RevenueCat sends updates,
-// this wrapper forwards to both the original delegate and Paydirt.
-#if canImport(RevenueCat)
-private class PaydirtPurchasesDelegate: NSObject, PurchasesDelegate {
-    weak var originalDelegate: PurchasesDelegate?
-    weak var paydirt: Paydirt?
+/// The subscription system which detected a cancellation.
+public enum PaydirtSubscriptionProvider: String {
+    case storeKit = "storekit"
+    case revenueCat = "revenuecat"
+    case superwall = "superwall"
+    case custom = "custom"
+}
 
-    func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
-        // Forward to original delegate first (host app's delegate)
-        originalDelegate?.purchases?(purchases, receivedUpdated: customerInfo)
+/// A provider-independent cancellation event.
+///
+/// RevenueCat, StoreKit, Superwall, or app-owned billing code can all create
+/// this value. Paydirt uses it to select the trial or paid cancellation form,
+/// prevent duplicate presentation, and attach consistent Slack metadata.
+public struct PaydirtSubscriptionCancellation {
+    public let provider: PaydirtSubscriptionProvider
+    public let productId: String
+    public let entitlementId: String?
+    public let userId: String?
+    public let isTrial: Bool
+    public let periodType: String
+    public let localizedPrice: String?
+    public let catalogPrice: Double?
+    public let currencyCode: String?
+    public let billingPeriod: String?
+    public let expirationDate: Date?
+    public let cancellationDetectedAt: Date?
+    public let deduplicationId: String?
+    public let additionalMetadata: [String: Any]
 
-        // Then let Paydirt handle it
-        paydirt?.handleCustomerInfoUpdate(customerInfo)
+    public init(
+        provider: PaydirtSubscriptionProvider,
+        productId: String,
+        entitlementId: String? = nil,
+        userId: String? = nil,
+        isTrial: Bool,
+        periodType: String? = nil,
+        localizedPrice: String? = nil,
+        catalogPrice: Double? = nil,
+        currencyCode: String? = nil,
+        billingPeriod: String? = nil,
+        expirationDate: Date? = nil,
+        cancellationDetectedAt: Date? = nil,
+        deduplicationId: String? = nil,
+        additionalMetadata: [String: Any] = [:]
+    ) {
+        self.provider = provider
+        self.productId = productId
+        self.entitlementId = entitlementId
+        self.userId = userId
+        self.isTrial = isTrial
+        self.periodType = periodType ?? (isTrial ? "Trial" : "Normal")
+        self.localizedPrice = localizedPrice
+        self.catalogPrice = catalogPrice
+        self.currencyCode = currencyCode
+        self.billingPeriod = billingPeriod
+        self.expirationDate = expirationDate
+        self.cancellationDetectedAt = cancellationDetectedAt
+        self.deduplicationId = deduplicationId
+        self.additionalMetadata = additionalMetadata
     }
 }
-#endif
 
 /// Main interface for Paydirt SDK
 /// Configure with API key, then present feedback forms
@@ -74,17 +113,9 @@ public final class Paydirt: NSObject {
 
     private var apiKey: String?
     private var baseURL: String = "https://api.paydirt.ai"
-    private var revenueCatEnabled = false
-    private var cancellationFormId: String?
-    private var trialCancellationFormId: String?
     private var currentUserId: String?
     private var theme: PaydirtTheme = .automatic
-
-    // Strong reference to prevent delegate wrapper from being deallocated
-    #if canImport(RevenueCat)
-    private var delegateWrapper: PaydirtPurchasesDelegate?
-    private var revenueCatForegroundObserver: NSObjectProtocol?
-    #endif
+    internal var storeKitCancellationMonitor: PaydirtStoreKitCancellationMonitor?
 
     private override init() {
         super.init()
@@ -170,17 +201,18 @@ public final class Paydirt: NSObject {
         )
     }
 
-    #if canImport(RevenueCat)
-    public static func enableRevenueCatIntegration(
+    /// Route a cancellation from any billing provider into the correct form.
+    public static func handleSubscriptionCancellation(
+        _ cancellation: PaydirtSubscriptionCancellation,
         cancellationFormId: String? = nil,
         trialCancellationFormId: String? = nil
     ) {
-        shared.enableRevenueCatIntegration(
+        shared.handleSubscriptionCancellation(
+            cancellation,
             cancellationFormId: cancellationFormId,
             trialCancellationFormId: trialCancellationFormId
         )
     }
-    #endif
 
     // MARK: - Cancellation Form Spam Prevention
 
@@ -239,7 +271,7 @@ public final class Paydirt: NSObject {
         if let theme = theme {
             self.theme = theme
         }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK v1.4.0 configured")
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v2.0.0 configured")
 
         // Retry any pending submissions from previous sessions
         let apiClient = PaydirtAPIClient(apiKey: apiKey, baseURL: self.baseURL)
@@ -247,80 +279,6 @@ public final class Paydirt: NSObject {
             await PendingSubmissionStore.shared.retryPending(using: apiClient)
         }
     }
-
-    // MARK: - RevenueCat Integration (Optional)
-
-    #if canImport(RevenueCat)
-    /// Enable automatic RevenueCat integration
-    /// SDK will listen for subscription cancellation events and show appropriate form
-    /// - Parameter cancellationFormId: Optional form ID to use (defaults to fetching cancellation type)
-    ///
-    /// Note: This method preserves any existing RevenueCat delegate. If your app has already
-    /// set Purchases.shared.delegate before calling this method, your delegate will continue
-    /// to receive callbacks alongside Paydirt.
-    public func enableRevenueCatIntegration(
-        cancellationFormId: String? = nil,
-        trialCancellationFormId: String? = nil
-    ) {
-        guard apiKey != nil else {
-            PaydirtLogger.shared.error("SDK", "Must configure SDK before enabling RevenueCat")
-            return
-        }
-
-        self.cancellationFormId = cancellationFormId
-        self.trialCancellationFormId = trialCancellationFormId
-        revenueCatEnabled = true
-
-        // Capture existing delegate before overwriting (delegate forwarding pattern)
-        // This ensures the host app's delegate still receives callbacks
-        let existingDelegate = Purchases.shared.delegate
-
-        // Create wrapper that forwards to both original delegate and Paydirt
-        let wrapper = PaydirtPurchasesDelegate()
-        wrapper.originalDelegate = existingDelegate
-        wrapper.paydirt = self
-
-        // Store strong reference to prevent deallocation
-        self.delegateWrapper = wrapper
-
-        // Set wrapper as the delegate
-        Purchases.shared.delegate = wrapper
-
-        if let observer = revenueCatForegroundObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        revenueCatForegroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.refreshRevenueCatCustomerInfo()
-        }
-
-        // Delegate updates are only received after RevenueCat performs an
-        // outbound request. Refresh immediately and whenever the app becomes
-        // active so cancellations made outside the app are detected.
-        refreshRevenueCatCustomerInfo()
-
-        if existingDelegate != nil {
-            PaydirtLogger.shared.info("SDK", "RevenueCat integration enabled (preserving existing delegate)")
-        } else {
-            PaydirtLogger.shared.info("SDK", "RevenueCat integration enabled")
-        }
-    }
-
-    private func refreshRevenueCatCustomerInfo() {
-        guard revenueCatEnabled else { return }
-        Task {
-            do {
-                let customerInfo = try await Purchases.shared.customerInfo()
-                handleCustomerInfoUpdate(customerInfo)
-            } catch {
-                PaydirtLogger.shared.warning("RevenueCat", "Could not refresh CustomerInfo")
-            }
-        }
-    }
-    #endif
 
     /// Set the current user ID for tracking
     /// - Parameter userId: User identifier (e.g., RevenueCat user ID)
@@ -474,7 +432,7 @@ public final class Paydirt: NSObject {
         presentFromRoot(hostingController, rootViewController: rootViewController)
     }
 
-    /// Internal method to present cancellation form when RevenueCat detects cancellation
+    /// Internal method retained for source compatibility with existing manual integrations.
     internal func presentCancellationFormOnWindow() {
         guard let rootViewController = resolveRootViewController() else {
             PaydirtLogger.shared.error("SDK", "Could not find root view controller")
@@ -485,7 +443,7 @@ public final class Paydirt: NSObject {
         hostingController = UIHostingController(
             rootView: showCancellationForm(
                 userId: currentUserId,
-                metadata: ["source": "revenuecat_cancellation"],
+                metadata: ["source": "manual_cancellation"],
                 onCompletion: { completed in
                     hostingController.dismiss(animated: true)
                     PaydirtLogger.shared.info("SDK", "Cancellation form completed: \(completed)")
@@ -527,9 +485,10 @@ public final class Paydirt: NSObject {
         return window.rootViewController
     }
 
-    private func presentCancellationFormOnWindowWithFormId(
+    internal func presentCancellationFormOnWindowWithFormId(
         _ formId: String,
-        metadata: [String: Any] = ["source": "revenuecat_cancellation"]
+        userId: String? = nil,
+        metadata: [String: Any] = ["source": "subscription_cancellation"]
     ) {
         guard let rootViewController = resolveRootViewController() else {
             PaydirtLogger.shared.error("SDK", "Could not find root view controller")
@@ -540,7 +499,7 @@ public final class Paydirt: NSObject {
         hostingController = UIHostingController(
             rootView: showForm(
                 formId: formId,
-                userId: currentUserId,
+                userId: userId ?? currentUserId,
                 metadata: metadata,
                 onCompletion: { completed in
                     hostingController.dismiss(animated: true)
@@ -553,158 +512,104 @@ public final class Paydirt: NSObject {
         hostingController.view.backgroundColor = .clear
         presentFromRoot(hostingController, rootViewController: rootViewController)
     }
-}
 
-// MARK: - RevenueCat Delegate Handling
-#if canImport(RevenueCat)
-extension Paydirt {
-    /// Internal method called by PaydirtPurchasesDelegate wrapper when customer info updates
-    /// This method handles Paydirt's cancellation detection logic
-    internal func handleCustomerInfoUpdate(_ customerInfo: CustomerInfo) {
-        guard revenueCatEnabled else { return }
-
-        let userId = customerInfo.originalAppUserId
-        self.currentUserId = userId
-
-        let cancelled = customerInfo.entitlements.active.values
-            .filter { entitlement in
-                guard let expirationDate = entitlement.expirationDate else { return false }
-                return !entitlement.willRenew && expirationDate > Date()
-            }
-            .sorted { lhs, rhs in
-                let left = lhs.unsubscribeDetectedAt ?? lhs.expirationDate ?? .distantPast
-                let right = rhs.unsubscribeDetectedAt ?? rhs.expirationDate ?? .distantPast
-                return left > right
-            }
-
-        guard let entitlement = cancelled.first else {
-            // Clear legacy per-entitlement flags for subscriptions which renew.
-            for renewing in customerInfo.entitlements.active.values where renewing.willRenew {
-                clearCancellationFormShown(userId: userId, entitlementId: renewing.identifier)
-            }
+    /// Route a provider cancellation into the trial or paid cancellation form.
+    public func handleSubscriptionCancellation(
+        _ cancellation: PaydirtSubscriptionCancellation,
+        cancellationFormId: String? = nil,
+        trialCancellationFormId: String? = nil
+    ) {
+        guard apiKey != nil else {
+            PaydirtLogger.shared.error("SDK", "Must configure SDK before handling subscription cancellation")
             return
         }
 
-        let expirationKey = entitlement.expirationDate.map {
+        let userId = cancellation.userId ?? currentUserId ?? "anonymous"
+        let expirationKey = cancellation.expirationDate.map {
             String(Int($0.timeIntervalSince1970))
         } ?? "unknown"
-        let cancellationKey = "\(entitlement.identifier)_\(entitlement.productIdentifier)_\(expirationKey)"
+        let cancellationKey = cancellation.deduplicationId
+            ?? "\(cancellation.provider.rawValue)_\(cancellation.productId)_\(expirationKey)"
 
         guard !hasCancellationFormBeenShown(userId: userId, entitlementId: cancellationKey) else {
-            PaydirtLogger.shared.debug("RevenueCat", "Cancellation form already shown for \(entitlement.productIdentifier)")
+            PaydirtLogger.shared.debug("Subscription", "Cancellation form already shown for \(cancellation.productId)")
             return
         }
+
+        // Claim before asynchronous form lookup so simultaneous provider updates
+        // cannot present duplicate forms. Release the claim when no form exists.
+        markCancellationFormShown(userId: userId, entitlementId: cancellationKey)
 
         Task { @MainActor [weak self] in
             guard let self = self else { return }
-            let isTrial = entitlement.periodType == .trial
-            let formType = isTrial ? "trial_expiration" : "cancellation"
-            let preferredFormId = isTrial ? self.trialCancellationFormId : self.cancellationFormId
-            let formId = await self.resolveRevenueCatFormId(preferredFormId, type: formType)
+            let formType = cancellation.isTrial ? "trial_expiration" : "cancellation"
+            let preferredFormId = cancellation.isTrial
+                ? trialCancellationFormId
+                : cancellationFormId
+            let formId = await self.resolveCancellationFormId(preferredFormId, type: formType)
 
             guard let formId = formId else {
-                PaydirtLogger.shared.warning("RevenueCat", "No enabled \(formType) form is available")
+                self.clearCancellationFormShown(userId: userId, entitlementId: cancellationKey)
+                PaydirtLogger.shared.warning("Subscription", "No enabled \(formType) form is available")
                 return
             }
 
-            let metadata = await self.revenueCatMetadata(
-                customerInfo: customerInfo,
-                entitlement: entitlement,
-                feedbackType: isTrial ? "trial_cancellation" : "subscription_cancellation",
-                otherCancelledProductIds: cancelled.dropFirst().map(\.productIdentifier)
+            self.presentCancellationFormOnWindowWithFormId(
+                formId,
+                userId: cancellation.userId,
+                metadata: self.subscriptionMetadata(for: cancellation)
             )
-
-            // Mark immediately before presentation to prevent duplicate delegate
-            // callbacks from opening multiple copies of the same cancellation.
-            self.markCancellationFormShown(userId: userId, entitlementId: cancellationKey)
-            self.presentCancellationFormOnWindowWithFormId(formId, metadata: metadata)
         }
     }
 
-    private func resolveRevenueCatFormId(_ preferredId: String?, type: String) async -> String? {
+    private func resolveCancellationFormId(_ preferredId: String?, type: String) async -> String? {
         if let preferredId = preferredId { return preferredId }
         guard let apiKey = apiKey else { return nil }
         let client = PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
         return try? await client.getForm(type: type)?.id
     }
 
-    private func revenueCatMetadata(
-        customerInfo: CustomerInfo,
-        entitlement: EntitlementInfo,
-        feedbackType: String,
-        otherCancelledProductIds: [String]
-    ) async -> [String: Any] {
+    private func subscriptionMetadata(
+        for cancellation: PaydirtSubscriptionCancellation
+    ) -> [String: Any] {
         let isoFormatter = ISO8601DateFormatter()
-        let product = await Purchases.shared.products([entitlement.productIdentifier]).first
+        var subscription = cancellation.additionalMetadata
+        subscription.merge([
+            "provider": cancellation.provider.rawValue,
+            "feedback_type": cancellation.isTrial ? "trial_cancellation" : "subscription_cancellation",
+            "product_id": cancellation.productId,
+            "period_type": cancellation.periodType,
+            "will_renew": false,
+        ]) { _, requiredValue in requiredValue }
 
-        var revenueCat: [String: Any] = [
-            "feedback_type": feedbackType,
-            "app_user_id": customerInfo.originalAppUserId,
-            "entitlement_id": entitlement.identifier,
-            "product_id": entitlement.productIdentifier,
-            "period_type": periodTypeName(entitlement.periodType),
-            "will_renew": entitlement.willRenew,
-            "store": String(describing: entitlement.store),
-            "is_sandbox": entitlement.isSandbox,
-            "ownership_type": String(describing: entitlement.ownershipType),
-        ]
-
-        if !otherCancelledProductIds.isEmpty {
-            revenueCat["other_cancelled_product_ids"] = otherCancelledProductIds
+        if let value = cancellation.entitlementId {
+            subscription["entitlement_id"] = value
         }
-        if let date = entitlement.latestPurchaseDate {
-            revenueCat["latest_purchase_date"] = isoFormatter.string(from: date)
+        if let value = cancellation.userId ?? currentUserId {
+            subscription["app_user_id"] = value
         }
-        if let date = entitlement.originalPurchaseDate {
-            revenueCat["original_purchase_date"] = isoFormatter.string(from: date)
+        if let value = cancellation.localizedPrice {
+            subscription["localized_price"] = value
         }
-        if let date = entitlement.expirationDate {
-            revenueCat["expiration_date"] = isoFormatter.string(from: date)
+        if let value = cancellation.catalogPrice {
+            subscription["catalog_price"] = value
         }
-        if let date = entitlement.unsubscribeDetectedAt {
-            revenueCat["unsubscribe_detected_at"] = isoFormatter.string(from: date)
+        if let value = cancellation.currencyCode {
+            subscription["currency_code"] = value
         }
-        if let date = entitlement.billingIssueDetectedAt {
-            revenueCat["billing_issue_detected_at"] = isoFormatter.string(from: date)
+        if let value = cancellation.billingPeriod {
+            subscription["billing_period"] = value
         }
-        if let planIdentifier = entitlement.productPlanIdentifier {
-            revenueCat["product_plan_id"] = planIdentifier
+        if let value = cancellation.expirationDate {
+            subscription["expiration_date"] = isoFormatter.string(from: value)
         }
-        if let product = product {
-            revenueCat["catalog_price"] = NSDecimalNumber(decimal: product.price).doubleValue
-            revenueCat["localized_price"] = product.localizedPriceString
-            if let currencyCode = product.currencyCode {
-                revenueCat["currency_code"] = currencyCode
-            }
-            if let period = product.subscriptionPeriod {
-                revenueCat["billing_period"] = "\(period.value) \(periodUnitName(period.unit))"
-            }
+        if let value = cancellation.cancellationDetectedAt {
+            subscription["cancellation_detected_at"] = isoFormatter.string(from: value)
         }
 
         return [
-            "source": "revenuecat_cancellation",
-            "revenuecat": revenueCat,
+            "source": "\(cancellation.provider.rawValue)_cancellation",
+            "subscription": subscription,
         ]
     }
-
-    private func periodTypeName(_ type: PeriodType) -> String {
-        switch type {
-        case .trial: return "Trial"
-        case .intro: return "Intro"
-        case .normal: return "Normal"
-        case .prepaid: return "Prepaid"
-        @unknown default: return "Unknown"
-        }
-    }
-
-    private func periodUnitName(_ unit: SubscriptionPeriod.Unit) -> String {
-        switch unit {
-        case .day: return "day"
-        case .week: return "week"
-        case .month: return "month"
-        case .year: return "year"
-        @unknown default: return "period"
-        }
-    }
 }
-#endif
