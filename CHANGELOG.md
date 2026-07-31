@@ -3,6 +3,17 @@
 All notable public SDK changes are documented here. Versions follow semantic
 versioning.
 
+## [2.0.2] - 2026-07-31
+
+### Changed
+
+- Restored the familiar `Paydirt.enableRevenueCatIntegration(...)` setup call
+  for RevenueCat apps while keeping the core SDK dependency-free.
+- Removed Paydirt's extra voice-consent dialog. Apple microphone permission is
+  requested only when the user taps the microphone button.
+- Kept the host app's existing RevenueCat version and made trial and paid form
+  identifiers optional.
+
 ## [2.0.1] - 2026-07-30
 
 ### Changed
@@ -53,6 +64,7 @@ configuring both SDKs. Native StoreKit and Superwall examples are in the
 
 - Stabilized the agent-installed cancellation feedback pilot.
 
+[2.0.2]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.2
 [2.0.1]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.1
 [2.0.0]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.0
 [1.4.0]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/1.4.0

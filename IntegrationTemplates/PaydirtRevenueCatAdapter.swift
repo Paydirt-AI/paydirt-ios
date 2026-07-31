@@ -3,8 +3,9 @@ import Paydirt
 import RevenueCat
 import UIKit
 
-/// Copy this file into a RevenueCat host app. The coding agent should call
-/// `start` after both RevenueCat and Paydirt are configured.
+/// Copy this file into a RevenueCat host app. It restores the familiar
+/// `Paydirt.enableRevenueCatIntegration(...)` API without adding RevenueCat as
+/// a dependency of the Paydirt package.
 ///
 /// This template is source, not a package-version requirement. Keep the host
 /// app's installed RevenueCat version. If that version uses older callback or
@@ -132,5 +133,30 @@ final class PaydirtRevenueCatAdapter: NSObject, PurchasesDelegate {
         @unknown default: unit = "period"
         }
         return "\(period.value) \(unit)"
+    }
+}
+
+public extension Paydirt {
+    /// Enables cancellation detection using the RevenueCat version already in
+    /// the host app. Call this after configuring both RevenueCat and Paydirt.
+    static func enableRevenueCatIntegration(
+        cancellationFormId: String? = nil,
+        trialCancellationFormId: String? = nil
+    ) {
+        PaydirtRevenueCatAdapter.shared.start(
+            cancellationFormId: cancellationFormId,
+            trialCancellationFormId: trialCancellationFormId
+        )
+    }
+
+    /// Instance convenience retained for apps upgrading from Paydirt 1.x.
+    func enableRevenueCatIntegration(
+        cancellationFormId: String? = nil,
+        trialCancellationFormId: String? = nil
+    ) {
+        Self.enableRevenueCatIntegration(
+            cancellationFormId: cancellationFormId,
+            trialCancellationFormId: trialCancellationFormId
+        )
     }
 }

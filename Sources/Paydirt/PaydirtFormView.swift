@@ -56,18 +56,6 @@ struct PaydirtFormView: View {
         } message: {
             Text("To use voice feedback, please enable microphone access in Settings > Privacy & Security > Microphone.")
         }
-        .confirmationDialog(
-            "Use voice feedback?",
-            isPresented: $viewModel.showVoiceConsent,
-            titleVisibility: .visible
-        ) {
-            Button("Start Recording") {
-                viewModel.confirmVoiceRecording()
-            }
-            Button("Use Text Instead", role: .cancel) {}
-        } message: {
-            Text("Your recording will be sent to Paydirt and OpenAI for transcription, then deleted after processing. Recording stops automatically after 2 minutes.")
-        }
     }
 
     /// Text input area with placeholder and loading states
@@ -329,7 +317,6 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     @Published var titleOpacity: Double = 1.0
     @Published var isRecording = false
     @Published var showMicrophoneAlert = false
-    @Published var showVoiceConsent = false
     @Published var showVoiceHint = true
     @Published var hasSubmittedResponse = false  // Track if user has submitted at least one response
     @Published var networkError: String? = nil  // Error message for network failures
@@ -346,7 +333,6 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     private var audioRecorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var lastAction: (() async -> Void)? = nil  // Store last action for retry
-    private var hasConfirmedVoiceConsent = false
     private var isFinalized = false
     private let onSubmission: ((PaydirtSubmissionResult) -> Void)?
 
@@ -475,20 +461,6 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     }
 
     func startRecording() {
-        guard hasConfirmedVoiceConsent else {
-            showVoiceConsent = true
-            return
-        }
-        startRecordingAfterConsent()
-    }
-
-    func confirmVoiceRecording() {
-        hasConfirmedVoiceConsent = true
-        showVoiceConsent = false
-        startRecordingAfterConsent()
-    }
-
-    private func startRecordingAfterConsent() {
         let session = AVAudioSession.sharedInstance()
 
         switch session.recordPermission {

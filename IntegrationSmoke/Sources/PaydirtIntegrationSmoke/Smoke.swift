@@ -66,7 +66,7 @@ enum PaydirtIntegrationSmoke {
     }
 
     static func thirdPartyProviderAdapters() {
-        PaydirtRevenueCatAdapter.shared.start(
+        Paydirt.shared.enableRevenueCatIntegration(
             cancellationFormId: "paid-cancellation-form-id",
             trialCancellationFormId: "trial-cancellation-form-id"
         )

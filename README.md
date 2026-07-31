@@ -53,7 +53,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.0.1")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.0.2")
 ]
 ```
 
@@ -146,17 +146,14 @@ Paydirt.enableStoreKitIntegration(
 
 ### RevenueCat
 
-Copy [`PaydirtRevenueCatAdapter.swift`](IntegrationTemplates/PaydirtRevenueCatAdapter.swift)
-into the host target, then start it after RevenueCat and Paydirt are configured.
-Paydirt does not alter the host's RevenueCat dependency or version. An older
-RevenueCat version is not a blocker: the coding agent adapts the copied source
-adapter to the customer-info or purchaser-info APIs already used by the app and
-omits optional metadata that version does not expose. If necessary, it calls
-`Paydirt.handleSubscriptionCancellation` from the app's existing confirmed
-RevenueCat cancellation path instead of upgrading RevenueCat.
+The coding agent copies Paydirt's small RevenueCat integration source into the
+host target automatically. Paydirt does not alter the host's RevenueCat
+dependency or version. An older RevenueCat version is not a blocker: the agent
+adapts that source to the customer-info or purchaser-info APIs already used by
+the app and omits optional metadata that version does not expose.
 
 ```swift
-PaydirtRevenueCatAdapter.shared.start(
+Paydirt.enableRevenueCatIntegration(
     cancellationFormId: "subscription-cancellation-form-id",
     trialCancellationFormId: "trial-cancellation-form-id"
 )
