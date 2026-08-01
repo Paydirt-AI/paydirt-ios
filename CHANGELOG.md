@@ -3,6 +3,16 @@
 All notable public SDK changes are documented here. Versions follow semantic
 versioning.
 
+## [2.0.4] - 2026-08-01
+
+### Fixed
+
+- Removed the contrasting editor-sized panel from the between-question loading
+  state so only the progress indicator appears on the form surface.
+- Prevented follow-up questions from restoring a text cursor or keyboard focus
+  before the user taps the editor.
+- Made the network error state use the same seamless form surface.
+
 ## [2.0.3] - 2026-08-01
 
 ### Fixed
@@ -75,6 +85,7 @@ configuring both SDKs. Native StoreKit and Superwall examples are in the
 
 - Stabilized the agent-installed cancellation feedback pilot.
 
+[2.0.4]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.4
 [2.0.3]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.3
 [2.0.2]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.2
 [2.0.1]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.1

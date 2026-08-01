@@ -51,6 +51,14 @@ struct PaydirtFormView: View {
             }
             viewModel.onDismiss = onDismiss
         }
+        .onChange(of: viewModel.isLoading) { isLoading in
+            if isLoading {
+                isTextEditorFocused = false
+            }
+        }
+        .onChange(of: viewModel.currentQuestion) { _ in
+            isTextEditorFocused = false
+        }
         .alert("Microphone Access Required", isPresented: $viewModel.showMicrophoneAlert) {
             Button("Settings") {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -73,6 +81,7 @@ struct PaydirtFormView: View {
         ZStack(alignment: .topLeading) {
             // Text editor for user input
             TextEditor(text: $viewModel.feedbackText)
+                .id(viewModel.currentQuestion)
                 .focused($isTextEditorFocused)
                 .font(.body)
                 .padding(.horizontal, 4)
@@ -86,7 +95,7 @@ struct PaydirtFormView: View {
                 .accessibilityHint("Enter your response to the current question")
 
             // Placeholder text when empty - MUST match TextEditor padding exactly
-            if viewModel.feedbackText.isEmpty && viewModel.networkError == nil {
+            if viewModel.feedbackText.isEmpty && viewModel.networkError == nil && !viewModel.isLoading {
                 Text("Tell us...")
                     .font(.body)
                     .foregroundColor(theme.secondaryText)
@@ -97,15 +106,12 @@ struct PaydirtFormView: View {
 
             // Loading overlay during API calls
             if viewModel.isLoading {
-                Rectangle()
-                    .fill(theme.surface)
-                    .frame(height: 200)
-                    .cornerRadius(8)
-                    .overlay(
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: theme.secondaryText))
-                            .scaleEffect(1.2)
-                    )
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: theme.secondaryText))
+                    .scaleEffect(1.2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+                    .accessibilityLabel("Loading next question")
             }
 
             // Error overlay when network error occurs
@@ -120,59 +126,55 @@ struct PaydirtFormView: View {
 
     /// Error overlay UI with retry and dismiss options
     private func errorOverlay(message: String) -> some View {
-        Rectangle()
-            .fill(theme.surface)
-            .frame(height: 200)
-            .cornerRadius(8)
-            .overlay(
-                VStack(spacing: 16) {
-                    // Error icon
-                    Image(systemName: "wifi.exclamationmark")
-                        .font(.system(size: 36))
-                        .foregroundColor(theme.error)
+        VStack(spacing: 16) {
+            // Error icon
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 36))
+                .foregroundColor(theme.error)
 
-                    // Error message
-                    Text(message)
+            // Error message
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(theme.secondaryText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+
+            // Action buttons
+            HStack(spacing: 16) {
+                // Try Again button
+                Button(action: {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.retryLastAction()
+                }) {
+                    Text("Try Again")
                         .font(.subheadline)
-                        .foregroundColor(theme.secondaryText)
-                        .multilineTextAlignment(.center)
+                        .fontWeight(.medium)
+                        .foregroundColor(theme.accentText)
                         .padding(.horizontal, 16)
-
-                    // Action buttons
-                    HStack(spacing: 16) {
-                        // Try Again button
-                        Button(action: {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            viewModel.retryLastAction()
-                        }) {
-                            Text("Try Again")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(theme.accentText)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(theme.accent)
-                                .clipShape(RoundedRectangle(cornerRadius: 20))
-                        }
-
-                        // Dismiss button
-                        Button(action: {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            viewModel.dismissWithError()
-                        }) {
-                            Text("Dismiss")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundColor(theme.primaryText)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(theme.surface)
-                                .overlay(RoundedRectangle(cornerRadius: 20).stroke(theme.border, lineWidth: 1))
-                                .clipShape(RoundedRectangle(cornerRadius: 20))
-                        }
-                    }
+                        .padding(.vertical, 8)
+                        .background(theme.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
                 }
-            )
+
+                // Dismiss button
+                Button(action: {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    viewModel.dismissWithError()
+                }) {
+                    Text("Dismiss")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(theme.primaryText)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(theme.surface)
+                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(theme.border, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(formBackground)
     }
 
     /// Action buttons container with conditional display based on recording state

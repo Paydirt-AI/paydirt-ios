@@ -271,7 +271,7 @@ public final class Paydirt: NSObject {
         if let theme = theme {
             self.theme = theme
         }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK v2.0.3 configured")
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v2.0.4 configured")
 
         // Retry any pending submissions from previous sessions
         let apiClient = PaydirtAPIClient(apiKey: apiKey, baseURL: self.baseURL)
