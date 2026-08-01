@@ -53,7 +53,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.0.2")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.0.3")
 ]
 ```
 

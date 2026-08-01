@@ -10,6 +10,7 @@ import AVFoundation
 // MARK: - Main Feedback View
 struct PaydirtFormView: View {
     @ObservedObject var viewModel: PaydirtFormViewModel
+    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isTextEditorFocused: Bool
     let theme: PaydirtTheme
     let onCompletion: (Bool) -> Void
@@ -33,12 +34,17 @@ struct PaydirtFormView: View {
             actionButtons
         }
         .padding(30)
-        .background(theme.background)
+        .background(formBackground)
         .cornerRadius(theme.cornerRadius)
+        .overlay(
+            RoundedRectangle(cornerRadius: theme.cornerRadius)
+                .stroke(theme.border, lineWidth: 1)
+        )
         .shadow(radius: 10)
         .padding(.horizontal, 20)
         .preferredColorScheme(theme.preferredColorScheme)
         .onAppear {
+            isTextEditorFocused = false
             viewModel.onCompletion = { _ in
                 onCompletion(true)
                 onDismiss()
@@ -58,22 +64,22 @@ struct PaydirtFormView: View {
         }
     }
 
+    private var formBackground: Color {
+        colorScheme == .dark ? theme.surface : theme.background
+    }
+
     /// Text input area with placeholder and loading states
     private var textInputArea: some View {
         ZStack(alignment: .topLeading) {
-            // Background rectangle
-            Rectangle()
-                .fill(theme.surface)
-                .frame(height: 200)
-                .cornerRadius(8)
-
             // Text editor for user input
             TextEditor(text: $viewModel.feedbackText)
                 .focused($isTextEditorFocused)
                 .font(.body)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 8)
-                .background(Color.clear)
+                .paydirtScrollContentBackgroundHidden()
+                .background(formBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 .foregroundColor(theme.primaryText)
                 .disabled(viewModel.isLoading || viewModel.networkError != nil)
                 .accessibilityLabel("Feedback answer")
@@ -81,7 +87,7 @@ struct PaydirtFormView: View {
 
             // Placeholder text when empty - MUST match TextEditor padding exactly
             if viewModel.feedbackText.isEmpty && viewModel.networkError == nil {
-                Text("Please tell us your feedback...")
+                Text("Tell us...")
                     .font(.body)
                     .foregroundColor(theme.secondaryText)
                     .padding(.horizontal, 8)
@@ -179,7 +185,7 @@ struct PaydirtFormView: View {
             }
 
             // Audio popup hint (shows temporarily)
-            if viewModel.showVoiceHint && !viewModel.isRecording {
+            if viewModel.showVoiceHint && !viewModel.isRecording && !isTextEditorFocused {
                 audioPopup
             }
         }
@@ -282,6 +288,17 @@ struct PaydirtFormView: View {
                     .foregroundColor(theme.secondaryText)
             }
             .padding(.trailing, 80) // Position to left of mic button
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func paydirtScrollContentBackgroundHidden() -> some View {
+        if #available(iOS 16.0, *) {
+            scrollContentBackground(.hidden)
+        } else {
+            self
         }
     }
 }

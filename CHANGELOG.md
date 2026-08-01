@@ -3,6 +3,17 @@
 All notable public SDK changes are documented here. Versions follow semantic
 versioning.
 
+## [2.0.3] - 2026-08-01
+
+### Fixed
+
+- Removed the unintended framed border around the feedback editor and restored
+  the minimal `Tell us...` prompt.
+- Kept the form unfocused until the user taps the editor and hid the voice hint
+  once the editor receives focus.
+- Improved automatic dark-mode contrast with a distinct semantic card surface
+  and subtle separator edge.
+
 ## [2.0.2] - 2026-07-31
 
 ### Changed
@@ -64,6 +75,7 @@ configuring both SDKs. Native StoreKit and Superwall examples are in the
 
 - Stabilized the agent-installed cancellation feedback pilot.
 
+[2.0.3]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.3
 [2.0.2]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.2
 [2.0.1]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.1
 [2.0.0]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.0
