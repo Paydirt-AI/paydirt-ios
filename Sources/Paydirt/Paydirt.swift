@@ -44,6 +44,23 @@ public struct PaydirtSubmissionResult {
     }
 }
 
+/// Server receipt for a completed feedback response.
+public struct PaydirtDeliveryStatus: Decodable {
+    public let responseId: String
+    public let received: Bool
+    public let completed: Bool
+    public let slackConfigured: Bool
+    public let slackDelivered: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case responseId = "response_id"
+        case received
+        case completed
+        case slackConfigured = "slack_configured"
+        case slackDelivered = "slack_delivered"
+    }
+}
+
 /// The subscription system which detected a cancellation.
 public enum PaydirtSubscriptionProvider: String {
     case storeKit = "storekit"
@@ -198,6 +215,24 @@ public final class Paydirt: NSObject {
             metadata: metadata,
             onSubmission: onSubmission,
             onCompletion: onCompletion
+        )
+    }
+
+    /// Present the DEBUG onboarding check for Suggest a Feature plus clear
+    /// trial and subscription cancellation test paths.
+    public static func presentSetupCheck(
+        featureFormId: String,
+        trialCancellationFormId: String,
+        subscriptionCancellationFormId: String,
+        requiresSlackDelivery: Bool = true,
+        completionKey: String? = nil
+    ) {
+        shared.presentSetupCheck(
+            featureFormId: featureFormId,
+            trialCancellationFormId: trialCancellationFormId,
+            subscriptionCancellationFormId: subscriptionCancellationFormId,
+            requiresSlackDelivery: requiresSlackDelivery,
+            completionKey: completionKey
         )
     }
 
@@ -429,6 +464,35 @@ public final class Paydirt: NSObject {
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.view.backgroundColor = .clear
 
+        presentFromRoot(hostingController, rootViewController: rootViewController)
+    }
+
+    public func presentSetupCheck(
+        featureFormId: String,
+        trialCancellationFormId: String,
+        subscriptionCancellationFormId: String,
+        requiresSlackDelivery: Bool = true,
+        completionKey: String? = nil
+    ) {
+        guard let apiKey, let rootViewController = resolveRootViewController() else {
+            PaydirtLogger.shared.error("SDK", "Must configure SDK before presenting setup check")
+            return
+        }
+
+        var hostingController: UIHostingController<AnyView>!
+        hostingController = UIHostingController(rootView: AnyView(PaydirtSetupCheckView(
+            featureFormId: featureFormId,
+            trialCancellationFormId: trialCancellationFormId,
+            subscriptionCancellationFormId: subscriptionCancellationFormId,
+            requiresSlackDelivery: requiresSlackDelivery,
+            completionKey: completionKey,
+            apiKey: apiKey,
+            baseURL: baseURL,
+            theme: theme,
+            onClose: { hostingController.dismiss(animated: true) }
+        )))
+        hostingController.modalPresentationStyle = .overFullScreen
+        hostingController.view.backgroundColor = .clear
         presentFromRoot(hostingController, rootViewController: rootViewController)
     }
 

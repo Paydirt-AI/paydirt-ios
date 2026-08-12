@@ -253,6 +253,25 @@ actor PaydirtAPIClient {
         PaydirtLogger.shared.info("API", "Response submitted successfully")
     }
 
+    func getDeliveryStatus(responseId: String) async throws -> PaydirtDeliveryStatus? {
+        guard let url = URL(string: "\(baseURL)/api/responses/\(responseId)/delivery") else {
+            throw PaydirtError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        authorize(&request)
+        request.timeoutInterval = 15
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw PaydirtError.apiError("Failed to check response delivery")
+        }
+        if httpResponse.statusCode == 404 { return nil }
+        guard httpResponse.statusCode == 200 else {
+            throw PaydirtError.apiError("Failed to check response delivery")
+        }
+        return try JSONDecoder().decode(PaydirtDeliveryStatus.self, from: data)
+    }
+
     /// Transcribe audio using Whisper via backend
     func transcribeAudio(audioData: Data) async throws -> String {
         guard let url = URL(string: "\(baseURL)/api/audio/transcribe") else {
