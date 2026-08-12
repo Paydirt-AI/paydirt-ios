@@ -25,8 +25,13 @@ Or for subscriptions:
 The canonical agent workflow is
 [`https://www.paydirt.ai/agents.md`](https://www.paydirt.ai/agents.md). It tells
 the agent to inspect the host app, register Paydirt's MCP server, authenticate
-you, create or reuse the forms, edit the requested in-app locations, preserve
-the existing StoreKit/RevenueCat/Superwall setup, build, and verify the result.
+you, create or reuse the forms, and ask whether delivery should use Slack and
+coding agents, Slack only, or coding agents only. Slack choices provision
+`#paydirt-suggest-a-feature` and `#paydirt-cancellations`. The agent then edits
+the requested in-app locations, preserves the existing
+StoreKit/RevenueCat/Superwall setup, builds, and opens a three-form setup check
+so you can verify Suggest a Feature, Trial Cancellation, and Subscription
+Cancellation end to end.
 
 If your agent needs the MCP registration command:
 
@@ -53,7 +58,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.0.4")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.1.0")
 ]
 ```
 

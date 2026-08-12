@@ -3,6 +3,15 @@
 All notable public SDK changes are documented here. Versions follow semantic
 versioning.
 
+## [2.1.0] - 2026-08-12
+
+### Added
+
+- Added a Debug-only three-form setup check for Suggest a Feature, Trial
+  Cancellation, and Subscription Cancellation.
+- Added delivery-status verification so developers can confirm each test
+  reached Paydirt and, when selected, the expected Slack channel.
+
 ## [2.0.4] - 2026-08-01
 
 ### Fixed
@@ -85,6 +94,7 @@ configuring both SDKs. Native StoreKit and Superwall examples are in the
 
 - Stabilized the agent-installed cancellation feedback pilot.
 
+[2.1.0]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.1.0
 [2.0.4]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.4
 [2.0.3]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.3
 [2.0.2]: https://github.com/Paydirt-AI/paydirt-ios/releases/tag/2.0.2
