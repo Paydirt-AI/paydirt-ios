@@ -1,0 +1,55 @@
+name: SDK smoke tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-contract:
+    name: Release and privacy contract
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release metadata and privacy manifest
+        run: scripts/verify-release.sh
+
+  core:
+    name: Core SDK (iOS 15+)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Paydirt for iOS Simulator
+        run: >-
+          xcodebuild
+          -scheme Paydirt
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/paydirt-core-derived"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+  provider-adapters:
+    name: RevenueCat and Superwall adapters
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile public integration templates
+        run: scripts/smoke-test-integrations.sh
+
+  lifecycle:
+    name: Completion and retry lifecycle
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated lifecycle tests on an available iPhone simulator
+        run: |
+          paydirt_simulator_id=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; print(next(d["udid"] for group in json.load(sys.stdin)["devices"].values() for d in group if d.get("isAvailable") and d["name"].startswith("iPhone")))')
+          xcodebuild -scheme Paydirt -destination "platform=iOS Simulator,id=$paydirt_simulator_id" -derivedDataPath "$RUNNER_TEMP/paydirt-lifecycle-derived" CODE_SIGNING_ALLOWED=NO test
