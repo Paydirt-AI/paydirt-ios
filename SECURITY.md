@@ -29,10 +29,10 @@ already be resolved.
   Slack credentials, Paydirt administrative credentials, or AI-provider keys in
   an iOS binary.
 - Accepted conversation turns are stored in the SDK's encrypted pending queue
-  until delivery succeeds.
+  until the server accepts the completed response. Interrupted drafts expire after seven days.
 - Raw transcript contents are not written to device logs.
 - Temporary voice recordings use file protection, are capped at two minutes,
-  and are deleted after transcription succeeds or fails.
+  and are retained while transcription is retryable. They are deleted after the transcript is durably checkpointed or the user discards them; files older than 24 hours are cleaned up when a form starts.
 - Submission IDs are stable across retries so network recovery does not create
   duplicate completed conversations.
 

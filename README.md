@@ -10,28 +10,29 @@ Superwall, and app-owned billing flows.
 
 ## Install with Codex, Claude Code, or another coding agent
 
-Give your coding agent the outcome and placement you want. For example:
+The shortest supported request is:
+
+> Add Paydirt and show me it working.
+
+The agent inspects the app, recommends cancellation feedback plus Suggest a
+Feature in Settings when subscriptions exist, and asks for one concise
+confirmation before setup. Browser onboarding asks whether completed feedback
+should go to Slack and coding agents (recommended), Slack only, or coding agents
+only. The agent then builds and leaves the three-test setup check visible on a
+simulator or connected iPhone. You personally submit Suggest a Feature, Trial
+Cancellation, and Subscription Cancellation; Paydirt verifies each delivery.
+
+You can also give the agent an exact outcome and placement. For example:
 
 > Install Paydirt in this iOS app. Add a feedback form titled “Export
 > feedback” after a successful export, send completed conversations to my
 > Slack feedback channel, build the app, and give me a test path.
 
-Or for subscriptions:
-
-> Install Paydirt for regular feedback, trial cancellation, and subscription
-> cancellation. Preserve this app's existing subscription provider and feedback
-> UI, connect every Paydirt form to Slack, build the app, and verify each test path.
-
 The canonical agent workflow is
 [`https://www.paydirt.ai/agents.md`](https://www.paydirt.ai/agents.md). It tells
 the agent to inspect the host app, register Paydirt's MCP server, authenticate
-you, create or reuse the forms, and ask whether delivery should use Slack and
-coding agents, Slack only, or coding agents only. Slack choices provision
-`#paydirt-suggest-a-feature` and `#paydirt-cancellations`. The agent then edits
-the requested in-app locations, preserves the existing
-StoreKit/RevenueCat/Superwall setup, builds, and opens a three-form setup check
-so you can verify Suggest a Feature, Trial Cancellation, and Subscription
-Cancellation end to end.
+you, create or reuse the forms, edit the requested in-app locations, preserve
+the existing StoreKit/RevenueCat/Superwall setup, build, and verify the result.
 
 If your agent needs the MCP registration command:
 
@@ -58,7 +59,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.1.0")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.2.0")
 ]
 ```
 
@@ -103,7 +104,7 @@ Paydirt.shared.presentForm(
 - Stable response IDs and idempotent offline retries
 - Optional structured submission callback for app and agent workflows
 - Encrypted conversation snapshots saved after every accepted turn
-- One final raw Slack message per completed conversation
+- Complete raw Q&A delivered to the selected Slack destination
 - Trial-versus-paid routing and provider-independent product metadata
 - A bundled Apple privacy manifest
 - System-aware light/dark theming plus a public custom theme API
@@ -243,10 +244,42 @@ Paydirt.presentForm(
 The callback runs after the completed conversation is saved to Paydirt's encrypted
 local queue. The same response ID and monotonic snapshot version are used from
 the initial question through final delivery, so retries cannot overwrite newer
-answers or create duplicate Slack messages.
+answers. Completed responses become eligible for server delivery; a local save is
+not proof that Slack received the response. Use the delivery receipt to verify it.
 
 Voice recordings are written to a protected temporary file, limited to two
-minutes, and deleted after transcription succeeds or fails.
+minutes, and retained while transcription can be retried. Once the transcript is
+saved to the encrypted queue, retries use that text rather than re-uploading audio.
+Recordings are removed after durable transcription, discard, or stale-file cleanup
+(on form startup for files older than 24 hours).
+
+Only the explicit **Finish** action completes feedback. Closing the overlay or
+choosing **Dismiss** after an error abandons the conversation; restarting an app
+never promotes an interrupted draft to completed feedback. Interrupted local
+drafts expire after seven days. Failed local writes keep the form open with a retry
+option rather than reporting a successful save.
+
+### Verify the requested forms
+
+Use this in a debug installation check, with the forms your app actually requested:
+
+```swift
+#if DEBUG
+Paydirt.presentSetupCheck(
+    forms: [
+        PaydirtSetupCheckForm(formId: "trial-id", title: "Trial Cancellation", feedbackType: "trial_cancellation"),
+        PaydirtSetupCheckForm(formId: "paid-id", title: "Subscription Cancellation", feedbackType: "subscription_cancellation")
+    ],
+    requiresSlackDelivery: true,
+    completionKey: "your-app.paydirt.setup"
+)
+#endif
+```
+
+Checks retain response IDs under the supplied completion key and re-check server
+receipts when reopened. This verifies form submission and the configured destination;
+real RevenueCat/StoreKit sandbox cancellation triggers must be tested separately.
+The original three-form `presentSetupCheck` overload remains available.
 
 ## Requirements
 

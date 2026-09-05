@@ -71,37 +71,52 @@ class PendingSubmissionStore {
     private let encryptionKeyAccount = "pending-submissions-encryption-key"
     private let queue = DispatchQueue(label: "ai.paydirt.pending")
 
-    private init() {
-        migrateLegacyQueueIfNeeded()
+    private var acknowledgedVersions: [UUID: Int] = [:]
+    private let testRead: (() -> [PendingSubmission]?)?
+    private let testWrite: (([PendingSubmission]) -> Bool)?
+
+    init(read: (() -> [PendingSubmission]?)? = nil, write: (([PendingSubmission]) -> Bool)? = nil) {
+        testRead = read
+        testWrite = write
+        if read == nil { migrateLegacyQueueIfNeeded() }
     }
 
-    func save(_ submission: PendingSubmission) {
-        let saved = queue.sync {
-            guard var pending = loadInternal() else {
-                return false
+    /// A stale acknowledgment or retry must never erase/replace a newer turn.
+    @discardableResult
+    func save(_ submission: PendingSubmission) -> Bool {
+        queue.sync {
+            guard submission.snapshotVersion > (acknowledgedVersions[submission.id] ?? -1),
+                  var pending = loadInternal() else { return false }
+            if let existing = pending.first(where: { $0.id == submission.id }) {
+                guard submission.snapshotVersion >= existing.snapshotVersion else { return false }
+                if existing.status != "in_progress" {
+                    guard submission.status == existing.status,
+                          submission.snapshotVersion == existing.snapshotVersion,
+                          submission.conversation == existing.conversation else { return false }
+                } else if submission.snapshotVersion == existing.snapshotVersion {
+                    guard submission.status == existing.status,
+                          submission.conversation == existing.conversation else { return false }
+                }
             }
             pending.removeAll { $0.id == submission.id }
             pending.append(submission)
             return persist(pending)
         }
-        if saved {
-            PaydirtLogger.shared.info("Queue", "Saved submission for retry: \(submission.id)")
-        } else {
-            PaydirtLogger.shared.error("Queue", "Could not persist submission for retry")
-        }
     }
 
-    func remove(id: UUID) {
+    @discardableResult
+    func remove(id: UUID, snapshotVersion: Int) -> Bool {
         queue.sync {
-            guard var pending = loadInternal() else {
-                return
-            }
-            pending.removeAll { $0.id == id }
-            _ = persist(pending)
+            guard var pending = loadInternal() else { return false }
+            pending.removeAll { $0.id == id && $0.snapshotVersion <= snapshotVersion }
+            guard persist(pending) else { return false }
+            acknowledgedVersions[id] = max(acknowledgedVersions[id] ?? -1, snapshotVersion)
+            return true
         }
     }
 
     private func loadInternal() -> [PendingSubmission]? {
+        if let testRead { return testRead() }
         guard FileManager.default.fileExists(atPath: storageURL.path) else {
             return []
         }
@@ -124,9 +139,12 @@ class PendingSubmissionStore {
 
     @discardableResult
     private func persist(_ submissions: [PendingSubmission]) -> Bool {
+        if let testWrite { return testWrite(submissions) }
         do {
             if submissions.isEmpty {
-                try? FileManager.default.removeItem(at: storageURL)
+                if FileManager.default.fileExists(atPath: storageURL.path) {
+                    try FileManager.default.removeItem(at: storageURL)
+                }
                 return true
             }
 
@@ -225,7 +243,7 @@ class PendingSubmissionStore {
         return item as? Data
     }
 
-    func retryPending(using apiClient: PaydirtAPIClient) async {
+    func retryPending(using apiClient: any PaydirtConversationClient) async {
         let pending = load()
         guard !pending.isEmpty else { return }
 
@@ -233,19 +251,12 @@ class PendingSubmissionStore {
 
         for var submission in pending {
             if submission.status == "in_progress" {
-                let hasAnswer = submission.conversation.contains {
-                    $0.role == "user" && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                // A restart is not a finish action. Expire interrupted drafts after
+                // seven days; never promote them to completed feedback.
+                if Date().timeIntervalSince(submission.updatedAt) > 7 * 24 * 60 * 60 {
+                    remove(id: submission.id, snapshotVersion: submission.snapshotVersion)
                 }
-                if !hasAnswer {
-                    remove(id: submission.id)
-                    continue
-                }
-                // A live draft left behind across an app launch is a finished
-                // session. Finalize the one durable snapshot and deliver once.
-                submission.status = "completed"
-                submission.snapshotVersion += 1
-                submission.updatedAt = Date()
-                save(submission)
+                continue
             }
 
             do {
@@ -259,12 +270,11 @@ class PendingSubmissionStore {
                     snapshotVersion: submission.snapshotVersion
                 )
                 if submission.status == "completed" || submission.status == "abandoned" {
-                    remove(id: submission.id)
+                    remove(id: submission.id, snapshotVersion: submission.snapshotVersion)
                 }
                 PaydirtLogger.shared.info("Queue", "Retry succeeded: \(submission.id)")
             } catch {
                 submission.retryCount += 1
-                remove(id: submission.id)
                 save(submission)
                 PaydirtLogger.shared.warning(
                     "Queue",
