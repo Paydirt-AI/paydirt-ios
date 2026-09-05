@@ -172,6 +172,9 @@ struct PaydirtFormView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 20))
                 }
             }
+            Button("Use text") { viewModel.useTextAfterError() }
+                .font(.caption)
+                .foregroundColor(theme.primaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(formBackground)
@@ -241,6 +244,15 @@ struct PaydirtFormView: View {
     /// Default controls - mic only, checkmark when typing
     private var defaultControls: some View {
         HStack {
+            if viewModel.hasSubmittedResponse || !viewModel.feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button("Finish") {
+                    isTextEditorFocused = false
+                    viewModel.completeFeedback()
+                }
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(theme.primaryText)
+                .accessibilityLabel("Finish and send feedback")
+            }
             Spacer()
 
             if viewModel.feedbackText.isEmpty {
@@ -259,6 +271,7 @@ struct PaydirtFormView: View {
                         .clipShape(Circle())
                 }
                 .accessibilityLabel("Record voice feedback")
+                .disabled(viewModel.isLoading || viewModel.networkError != nil)
             } else {
                 // Checkmark button to submit
                 Button(action: {
@@ -273,6 +286,7 @@ struct PaydirtFormView: View {
                         .clipShape(Circle())
                 }
                 .accessibilityLabel("Submit answer")
+                .disabled(viewModel.isLoading || viewModel.networkError != nil)
             }
         }
     }
@@ -344,7 +358,9 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     private let userId: String?
     private let metadata: [String: Any]?
     private let appContext: String?
-    private let apiClient: PaydirtAPIClient
+    private let apiClient: any PaydirtConversationClient
+    private let submissionStore: PendingSubmissionStore
+    private var activeTask: Task<Void, Never>?
     private var conversation: [ConversationMessage] = []
     private let conversationId = UUID()
     private var snapshotVersion = 0
@@ -362,7 +378,8 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         form: PaydirtForm,
         userId: String?,
         metadata: [String: Any]?,
-        apiClient: PaydirtAPIClient,
+        apiClient: any PaydirtConversationClient,
+        submissionStore: PendingSubmissionStore = .shared,
         onSubmission: ((PaydirtSubmissionResult) -> Void)? = nil
     ) {
         self.formId = form.id
@@ -371,8 +388,10 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         self.metadata = metadata
         self.appContext = metadata?["app_context"] as? String
         self.apiClient = apiClient
+        self.submissionStore = submissionStore
         self.onSubmission = onSubmission
         super.init()
+        cleanupExpiredRecordings()
 
         // Add initial question to conversation
         conversation.append(ConversationMessage(role: "assistant", content: form.prompt, input_type: nil))
@@ -381,7 +400,8 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
     /// Persist one complete conversation snapshot. Local encrypted storage is
     /// written synchronously before the best-effort network upsert begins.
-    private func checkpoint(status: String) {
+    @discardableResult
+    private func checkpoint(status: String) -> Bool {
         snapshotVersion += 1
         let version = snapshotVersion
         let snapshot = PendingSubmission(
@@ -393,7 +413,10 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             status: status,
             snapshotVersion: version
         )
-        PendingSubmissionStore.shared.save(snapshot)
+        guard submissionStore.save(snapshot) else {
+            networkError = "Could not save feedback on this device. Please try again."
+            return false
+        }
 
         let messages = conversation
         Task {
@@ -408,7 +431,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                     snapshotVersion: version
                 )
                 if status == "completed" || status == "abandoned" {
-                    PendingSubmissionStore.shared.remove(id: conversationId)
+                    submissionStore.remove(id: conversationId, snapshotVersion: version)
                 }
             } catch {
                 PaydirtLogger.shared.warning(
@@ -417,11 +440,12 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                 )
             }
         }
+        return true
     }
 
     func processTextFeedback() {
         let feedback = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !feedback.isEmpty else { return }
+        guard !isFinalized, !isLoading, !feedback.isEmpty else { return }
 
         feedbackText = ""
         conversation.append(ConversationMessage(role: "user", content: feedback, input_type: "text"))
@@ -439,13 +463,24 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             await self.executeTextFeedback(feedback: feedback)
         }
 
-        Task {
+        activeTask = Task {
             await executeTextFeedback(feedback: feedback)
         }
     }
 
     /// Internal method to execute text feedback - separated for retry support
     private func executeTextFeedback(feedback: String) async {
+        guard !isFinalized, !Task.isCancelled else { return }
+        // Also retries a failed local write without appending the accepted answer.
+        guard checkpoint(status: "in_progress") else {
+            isLoading = false
+            titleOpacity = 1
+            return
+        }
+        if let url = recordingURL {
+            try? FileManager.default.removeItem(at: url)
+            recordingURL = nil
+        }
         do {
             let response = try await apiClient.sendMessage(
                 formId: formId,
@@ -455,6 +490,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                 appContext: appContext
             )
 
+            guard !isFinalized, !Task.isCancelled else { return }
             previousResponseId = response.response_id
 
             PaydirtLogger.shared.info("Form", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
@@ -471,6 +507,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             // Clear error state on success
             networkError = nil
         } catch {
+            guard !isFinalized, !Task.isCancelled else { return }
             PaydirtLogger.shared.error("Form", "Failed to process feedback: \(error)")
             networkError = "Unable to send feedback. Please check your connection."
         }
@@ -480,6 +517,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     }
 
     func startRecording() {
+        guard !isFinalized, !isLoading, networkError == nil else { return }
         let session = AVAudioSession.sharedInstance()
 
         switch session.recordPermission {
@@ -501,6 +539,8 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     }
 
     private func beginRecording() {
+        guard !isFinalized, !isLoading else { return }
+        cancelRecording()
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
@@ -542,6 +582,9 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         if let url = recordingURL {
             try? FileManager.default.removeItem(at: url)
         }
+        recordingURL = nil
+        audioRecorder = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     func stopAndProcessRecording() {
@@ -553,76 +596,45 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             return
         }
 
+        processRecording(at: url)
+    }
+
+    /// Separate entry point also used by lifecycle tests with protected fixtures.
+    func processRecording(at url: URL) {
+        guard !isFinalized, !isLoading else { return }
+        recordingURL = url
         isLoading = true
         titleOpacity = 0.3
-
-        // Store action for potential retry
-        lastAction = { [weak self] in
-            guard let self = self else { return }
-            await self.executeAudioProcessing(url: url)
-        }
-
-        Task {
-            await executeAudioProcessing(url: url)
-        }
+        lastAction = { [weak self] in await self?.executeAudioProcessing(url: url) }
+        activeTask = Task { await executeAudioProcessing(url: url) }
     }
 
     /// Internal method to execute audio processing - separated for retry support
     private func executeAudioProcessing(url: URL) async {
-        defer {
-            // Cleanup recording file in all paths
-            try? FileManager.default.removeItem(at: url)
-        }
-
+        guard !isFinalized, !Task.isCancelled else { return }
         do {
-            // Read audio data
             let audioData = try Data(contentsOf: url)
-            PaydirtLogger.shared.info("Audio", "Audio data size: \(audioData.count) bytes")
-
-            // Transcribe via Paydirt API (which uses OpenAI Whisper)
             let transcription = try await apiClient.transcribeAudio(audioData: audioData)
-            PaydirtLogger.shared.info("Audio", "Transcription completed (\(transcription.count) characters)")
-
-            if !transcription.isEmpty {
-                // Add to conversation
-                conversation.append(ConversationMessage(role: "user", content: transcription, input_type: "audio"))
-                hasSubmittedResponse = true
-                checkpoint(status: "in_progress")
-
-                // Get follow-up
-                let response = try await apiClient.sendMessage(
-                    formId: formId,
-                    message: transcription,
-                    conversationHistory: conversation,
-                    previousResponseId: previousResponseId,
-                    appContext: appContext
-                )
-
-                previousResponseId = response.response_id
-
-                PaydirtLogger.shared.info("Audio", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
-
-                if !isFinalized, let followUp = response.follow_up_question {
-                    conversation.append(ConversationMessage(role: "assistant", content: followUp, input_type: nil))
-                    checkpoint(status: "in_progress")
-                    await animateQuestionChange(to: followUp)
-                } else {
-                    PaydirtLogger.shared.info("Audio", "No follow-up question received")
-                }
-
-                // Clear error state on success
-                networkError = nil
-            } else {
-                PaydirtLogger.shared.error("Audio", "Empty transcription returned")
-                networkError = "Could not understand audio. Please try again."
+            guard !isFinalized, !Task.isCancelled else { return }
+            guard !transcription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                networkError = "Could not understand audio. Try again or use text."
+                isLoading = false
+                titleOpacity = 1
+                return
             }
+            conversation.append(ConversationMessage(role: "user", content: transcription, input_type: "audio"))
+            hasSubmittedResponse = true
+            // The answer is now accepted. Every subsequent retry persists it and
+            // requests a follow-up; it never uploads or appends the answer again.
+            lastAction = { [weak self] in await self?.executeTextFeedback(feedback: transcription) }
+            await executeTextFeedback(feedback: transcription)
         } catch {
-            PaydirtLogger.shared.error("Audio", "Transcription failed: \(error)")
-            networkError = "Unable to process audio. Please check your connection."
+            guard !isFinalized, !Task.isCancelled else { return }
+            // Keep the protected recording until retry, discard or expiry.
+            networkError = "Unable to process audio. Try again or use text."
+            isLoading = false
+            titleOpacity = 1
         }
-
-        isLoading = false
-        titleOpacity = 1.0
     }
 
     func completeFeedback() {
@@ -630,8 +642,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
         guard !isFinalized else { return }
 
-        // If the user dismisses while text is still in the editor, include
-        // those exact words in the final conversation instead of discarding it.
+        // Only the explicit Finish action may accept an editor draft.
         let draft = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !draft.isEmpty {
             conversation.append(ConversationMessage(role: "user", content: draft, input_type: "text"))
@@ -639,12 +650,9 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             hasSubmittedResponse = true
         }
 
-        isFinalized = true
-
         guard hasSubmittedResponse else {
             PaydirtLogger.shared.info("Form", "Not enough messages (\(conversation.count)), dismissing without submit")
-            checkpoint(status: "abandoned")
-            onDismiss?()
+            abandonFeedback()
             return
         }
 
@@ -659,8 +667,16 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         )
         snapshotVersion = submission.snapshotVersion
 
-        // Save to local queue first (guarantees we don't lose it)
-        PendingSubmissionStore.shared.save(submission)
+        guard submissionStore.save(submission) else {
+            networkError = "Could not save feedback on this device. Please try again."
+            lastAction = { [weak self] in self?.completeFeedback() }
+            isLoading = false
+            return
+        }
+        isFinalized = true
+        activeTask?.cancel()
+        lastAction = nil
+        cancelRecording()
         onSubmission?(PaydirtSubmissionResult(
             responseId: submission.id.uuidString.lowercased(),
             formId: formId,
@@ -678,7 +694,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         let finalConversation = conversation
 
         // Fire-and-forget: the form dismisses immediately, while the encrypted
-        // snapshot remains until the API and single Slack delivery succeed.
+        // snapshot remains until the API durably accepts the completed response.
         Task {
             do {
                 PaydirtLogger.shared.info("Form", "Submitting response for form \(formId)")
@@ -692,7 +708,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
                     snapshotVersion: submission.snapshotVersion
                 )
                 // Success - remove from pending queue
-                PendingSubmissionStore.shared.remove(id: submission.id)
+                submissionStore.remove(id: submission.id, snapshotVersion: submission.snapshotVersion)
                 PaydirtLogger.shared.info("Form", "Feedback submitted successfully")
             } catch {
                 PaydirtLogger.shared.error("Form", "Submission failed, queued for retry: \(error)")
@@ -706,7 +722,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
     /// Checkpoint accepted turns when the app is interrupted. This deliberately
     /// does not finalize the response, so Slack still receives only one message
-    /// after an intentional completion or dismissal.
+    /// after an explicit Finish action.
     func saveProgressForInterruption() {
         guard !isFinalized else { return }
         checkpoint(status: "in_progress")
@@ -720,19 +736,49 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
     /// Retry the last failed action after a network error
     func retryLastAction() {
+        guard !isFinalized, !isLoading, let lastAction else { return }
         networkError = nil
         isLoading = true
         titleOpacity = 0.3
 
-        Task {
-            await lastAction?()
-        }
+        activeTask = Task { await lastAction() }
     }
 
     /// Dismiss the form when user chooses to abandon after an error
     func dismissWithError() {
+        abandonFeedback()
+    }
+
+    func abandonFeedback() {
+        guard !isFinalized else { return }
+        isFinalized = true
+        activeTask?.cancel()
+        lastAction = nil
+        feedbackText = ""
+        cancelRecording()
+        checkpoint(status: "abandoned")
+        onDismiss?()
+    }
+
+    func useTextAfterError() {
+        guard !isFinalized else { return }
+        activeTask?.cancel()
+        cancelRecording()
+        lastAction = nil
         networkError = nil
-        completeFeedback()
+        isLoading = false
+        titleOpacity = 1
+    }
+
+    private func cleanupExpiredRecordings() {
+        let directory = FileManager.default.temporaryDirectory
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        for file in files where file.lastPathComponent.hasPrefix("paydirt_recording_") {
+            let created = try? file.resourceValues(forKeys: [.creationDateKey]).creationDate
+            if let created, Date().timeIntervalSince(created) > 24 * 60 * 60 {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 
     /// Automatically hides audio feature popup after delay
@@ -754,6 +800,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
         try? await Task.sleep(nanoseconds: 300_000_000)
 
+        guard !isFinalized, !Task.isCancelled else { return }
         currentQuestion = newQuestion
         showVoiceHint = false  // No hint on follow-up questions
 

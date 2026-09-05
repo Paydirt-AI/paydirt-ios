@@ -21,5 +21,6 @@ let package = Package(
                 .process("Resources")
             ]
         ),
+        .testTarget(name: "PaydirtTests", dependencies: ["Paydirt"]),
     ]
 )

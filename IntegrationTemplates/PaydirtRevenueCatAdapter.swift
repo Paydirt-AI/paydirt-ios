@@ -26,8 +26,10 @@ final class PaydirtRevenueCatAdapter: NSObject, PurchasesDelegate {
     ) {
         self.cancellationFormId = cancellationFormId
         self.trialCancellationFormId = trialCancellationFormId
-        originalDelegate = Purchases.shared.delegate
-        Purchases.shared.delegate = self
+        if Purchases.shared.delegate !== self {
+            originalDelegate = Purchases.shared.delegate
+            Purchases.shared.delegate = self
+        }
 
         if let foregroundObserver {
             NotificationCenter.default.removeObserver(foregroundObserver)
@@ -40,6 +42,17 @@ final class PaydirtRevenueCatAdapter: NSObject, PurchasesDelegate {
             self?.refresh()
         }
         refresh()
+    }
+
+    // Preserve optional delegate callbacks supported by the host's installed
+    // RevenueCat version, including promoted-purchase callbacks.
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || originalDelegate?.responds(to: selector) == true
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        if originalDelegate?.responds(to: selector) == true { return originalDelegate }
+        return super.forwardingTarget(for: selector)
     }
 
     func purchases(_ purchases: Purchases, receivedUpdated customerInfo: CustomerInfo) {
@@ -58,7 +71,11 @@ final class PaydirtRevenueCatAdapter: NSObject, PurchasesDelegate {
         let cancelled = customerInfo.entitlements.active.values
             .filter { entitlement in
                 guard let expirationDate = entitlement.expirationDate else { return false }
+                // Do not label billing trouble or an unknown nonrenewing state
+                // as a voluntary cancellation.
                 return !entitlement.willRenew && expirationDate > Date()
+                    && entitlement.unsubscribeDetectedAt != nil
+                    && entitlement.billingIssueDetectedAt == nil
             }
             .sorted { lhs, rhs in
                 let left = lhs.unsubscribeDetectedAt ?? lhs.expirationDate ?? .distantPast
@@ -66,50 +83,52 @@ final class PaydirtRevenueCatAdapter: NSObject, PurchasesDelegate {
                 return left > right
             }
 
-        guard let entitlement = cancelled.first else { return }
+        for entitlement in cancelled {
+            Task {
+                let product = await Purchases.shared.products([entitlement.productIdentifier]).first
+                let isTrial = entitlement.periodType == .trial
+                let expirationKey = entitlement.expirationDate.map {
+                    String(Int($0.timeIntervalSince1970))
+                } ?? "unknown"
 
-        Task {
-            let product = await Purchases.shared.products([entitlement.productIdentifier]).first
-            let isTrial = entitlement.periodType == .trial
-            let expirationKey = entitlement.expirationDate.map {
-                String(Int($0.timeIntervalSince1970))
-            } ?? "unknown"
+                var details: [String: Any] = [
+                    "store": String(describing: entitlement.store),
+                    "is_sandbox": entitlement.isSandbox,
+                    "ownership_type": String(describing: entitlement.ownershipType),
+                "cancellation_evidence": "unsubscribe_detected",
+                ]
+                if let value = entitlement.latestPurchaseDate {
+                    details["latest_purchase_date"] = ISO8601DateFormatter().string(from: value)
+                }
+                if let value = entitlement.originalPurchaseDate {
+                    details["original_purchase_date"] = ISO8601DateFormatter().string(from: value)
+                }
+                let others = cancelled.filter { $0.identifier != entitlement.identifier }
+                if !others.isEmpty {
+                    details["other_cancelled_product_ids"] = others.map(\.productIdentifier)
+                }
 
-            var details: [String: Any] = [
-                "store": String(describing: entitlement.store),
-                "is_sandbox": entitlement.isSandbox,
-                "ownership_type": String(describing: entitlement.ownershipType),
-            ]
-            if let value = entitlement.latestPurchaseDate {
-                details["latest_purchase_date"] = ISO8601DateFormatter().string(from: value)
+                Paydirt.handleSubscriptionCancellation(
+                    PaydirtSubscriptionCancellation(
+                        provider: .revenueCat,
+                        productId: entitlement.productIdentifier,
+                        entitlementId: entitlement.identifier,
+                        userId: customerInfo.originalAppUserId,
+                        isTrial: isTrial,
+                        periodType: Self.periodTypeName(entitlement.periodType),
+                        localizedPrice: product?.localizedPriceString,
+                        catalogPrice: product.map { NSDecimalNumber(decimal: $0.price).doubleValue },
+                        currencyCode: product?.currencyCode,
+                        billingPeriod: product?.subscriptionPeriod.map(Self.billingPeriod),
+                        expirationDate: entitlement.expirationDate,
+                        cancellationDetectedAt: entitlement.unsubscribeDetectedAt,
+                        deduplicationId: "revenuecat_\(entitlement.productIdentifier)_\(expirationKey)",
+                        additionalMetadata: details
+                    ),
+                    cancellationFormId: cancellationFormId,
+                    trialCancellationFormId: trialCancellationFormId
+                )
             }
-            if let value = entitlement.originalPurchaseDate {
-                details["original_purchase_date"] = ISO8601DateFormatter().string(from: value)
-            }
-            if !cancelled.dropFirst().isEmpty {
-                details["other_cancelled_product_ids"] = cancelled.dropFirst().map(\.productIdentifier)
-            }
-
-            Paydirt.handleSubscriptionCancellation(
-                PaydirtSubscriptionCancellation(
-                    provider: .revenueCat,
-                    productId: entitlement.productIdentifier,
-                    entitlementId: entitlement.identifier,
-                    userId: customerInfo.originalAppUserId,
-                    isTrial: isTrial,
-                    periodType: Self.periodTypeName(entitlement.periodType),
-                    localizedPrice: product?.localizedPriceString,
-                    catalogPrice: product.map { NSDecimalNumber(decimal: $0.price).doubleValue },
-                    currencyCode: product?.currencyCode,
-                    billingPeriod: product?.subscriptionPeriod.map(Self.billingPeriod),
-                    expirationDate: entitlement.expirationDate,
-                    cancellationDetectedAt: entitlement.unsubscribeDetectedAt,
-                    deduplicationId: "revenuecat_\(entitlement.productIdentifier)_\(expirationKey)",
-                    additionalMetadata: details
-                ),
-                cancellationFormId: cancellationFormId,
-                trialCancellationFormId: trialCancellationFormId
-            )
         }
     }
 

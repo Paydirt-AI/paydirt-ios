@@ -1,29 +1,21 @@
 import SwiftUI
 
+/// One requested form to verify. Presentation checks do not prove a billing-provider trigger.
+public struct PaydirtSetupCheckForm: Identifiable {
+    public let formId: String
+    public let title: String
+    public let feedbackType: String
+    public var id: String { formId }
+
+    public init(formId: String, title: String, feedbackType: String) {
+        self.formId = formId
+        self.title = title
+        self.feedbackType = feedbackType
+    }
+}
+
 @available(iOS 15.0, *)
 struct PaydirtSetupCheckView: View {
-    private enum TestKind: String, CaseIterable {
-        case feature
-        case trial
-        case subscription
-
-        var title: String {
-            switch self {
-            case .feature: return "Suggest a Feature"
-            case .trial: return "Trial Cancellation"
-            case .subscription: return "Subscription Cancellation"
-            }
-        }
-
-        var icon: String {
-            switch self {
-            case .feature: return "lightbulb"
-            case .trial: return "clock.arrow.circlepath"
-            case .subscription: return "creditcard"
-            }
-        }
-    }
-
     private enum TestState: Equatable {
         case notTested
         case saved
@@ -51,9 +43,7 @@ struct PaydirtSetupCheckView: View {
         }
     }
 
-    let featureFormId: String
-    let trialCancellationFormId: String
-    let subscriptionCancellationFormId: String
+    let forms: [PaydirtSetupCheckForm]
     let requiresSlackDelivery: Bool
     let completionKey: String?
     let apiKey: String
@@ -61,12 +51,12 @@ struct PaydirtSetupCheckView: View {
     let theme: PaydirtTheme
     let onClose: () -> Void
 
-    @State private var states: [TestKind: TestState] = [:]
-    @State private var responseIds: [TestKind: String] = [:]
+    @State private var states: [String: TestState] = [:]
+    @State private var responseIds: [String: String] = [:]
 
     private var allVerified: Bool {
-        TestKind.allCases.allSatisfy {
-            states[$0] == .delivered || (!requiresSlackDelivery && states[$0] == .received)
+        !forms.isEmpty && forms.allSatisfy {
+            states[$0.id] == .delivered || (!requiresSlackDelivery && states[$0.id] == .received)
         }
     }
 
@@ -92,22 +82,17 @@ struct PaydirtSetupCheckView: View {
                     }
 
                     testSection(
-                        title: "Suggest a Feature",
+                        title: "Requested forms",
                         subtitle: requiresSlackDelivery
-                            ? "Routes to #paydirt-suggest-a-feature"
-                            : "Verifies receipt by Paydirt",
-                        tests: [.feature]
+                            ? "Verifies completed feedback in your selected Slack channels"
+                            : "Verifies completed feedback received by Paydirt",
+                        tests: forms
                     )
-                    testSection(
-                        title: "Why users cancel",
-                        subtitle: requiresSlackDelivery
-                            ? "Both route to #paydirt-cancellations with distinct labels"
-                            : "Verifies the two distinct cancellation paths",
-                        tests: [.trial, .subscription]
-                    )
+                    Text("These checks verify forms and delivery. Verify real subscription triggers separately in your billing sandbox.")
+                        .font(.caption).foregroundStyle(.secondary)
 
                     if allVerified {
-                        Label(requiresSlackDelivery ? "3 of 3 tests delivered" : "3 of 3 tests received", systemImage: "checkmark.seal.fill")
+                        Label(requiresSlackDelivery ? "\(forms.count) of \(forms.count) tests delivered" : "\(forms.count) of \(forms.count) tests received", systemImage: "checkmark.seal.fill")
                             .font(.headline)
                             .foregroundStyle(.green)
                             .frame(maxWidth: .infinity)
@@ -121,6 +106,17 @@ struct PaydirtSetupCheckView: View {
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .padding(20)
         }
+        .task {
+            guard let completionKey else { return }
+            for form in forms {
+                let key = "\(completionKey).response.\(form.id)"
+                if let responseId = UserDefaults.standard.string(forKey: key) {
+                    responseIds[form.id] = responseId
+                    states[form.id] = .saved
+                    Task { await verifyDelivery(responseId: responseId, kind: form) }
+                }
+            }
+        }
         .onChange(of: allVerified) { verified in
             if verified, let completionKey {
                 UserDefaults.standard.set(true, forKey: completionKey)
@@ -131,32 +127,32 @@ struct PaydirtSetupCheckView: View {
     private var completionMessage: String {
         if allVerified {
             return requiresSlackDelivery
-                ? "All three responses reached their Slack destinations."
-                : "All three responses were received by Paydirt."
+                ? "All requested responses reached their Slack destinations."
+                : "All requested responses were received by Paydirt."
         }
         return requiresSlackDelivery
-            ? "Submit each test yourself. Paydirt will verify the server and Slack delivery."
-            : "Submit each test yourself. Paydirt will verify that the server received it."
+            ? "Complete each requested form. Paydirt will verify the server and Slack delivery."
+            : "Complete each requested form. Paydirt will verify that the server received it."
     }
 
     @ViewBuilder
-    private func testSection(title: String, subtitle: String, tests: [TestKind]) -> some View {
+    private func testSection(title: String, subtitle: String, tests: [PaydirtSetupCheckForm]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.headline)
             Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            ForEach(tests, id: \.self) { kind in
+            ForEach(tests) { kind in
                 Button { run(kind) } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: kind.icon)
+                        Image(systemName: "checklist")
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(kind.title).foregroundStyle(.primary)
-                            Text((states[kind] ?? .notTested).label)
+                            Text((states[kind.id] ?? .notTested).label)
                                 .font(.caption)
-                                .foregroundStyle((states[kind] ?? .notTested).color)
+                                .foregroundStyle((states[kind.id] ?? .notTested).color)
                         }
                         Spacer()
-                        let verified = states[kind] == .delivered || (!requiresSlackDelivery && states[kind] == .received)
+                        let verified = states[kind.id] == .delivered || (!requiresSlackDelivery && states[kind.id] == .received)
                         Image(systemName: verified ? "checkmark.circle.fill" : "chevron.right")
                             .foregroundStyle(verified ? .green : .secondary)
                     }
@@ -165,61 +161,50 @@ struct PaydirtSetupCheckView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(states[kind] == .saved || states[kind] == .received || states[kind] == .delivered)
+                .disabled(states[kind.id] == .saved || states[kind.id] == .received || states[kind.id] == .delivered)
             }
         }
     }
 
-    private func run(_ kind: TestKind) {
-        if states[kind] == .retrying, let responseId = responseIds[kind] {
-            states[kind] = .received
+    private func run(_ kind: PaydirtSetupCheckForm) {
+        if states[kind.id] == .retrying, let responseId = responseIds[kind.id] {
+            states[kind.id] = .received
             Task { await verifyDelivery(responseId: responseId, kind: kind) }
             return
         }
 
-        let formId: String
-        let feedbackType: String
-        switch kind {
-        case .feature:
-            formId = featureFormId
-            feedbackType = "feature_request"
-        case .trial:
-            formId = trialCancellationFormId
-            feedbackType = "trial_cancellation"
-        case .subscription:
-            formId = subscriptionCancellationFormId
-            feedbackType = "subscription_cancellation"
-        }
-
         Paydirt.presentForm(
-            formId: formId,
+            formId: kind.formId,
             metadata: [
                 "paydirt_install_test": true,
-                "feedback_type": feedbackType,
+                "feedback_type": kind.feedbackType,
                 "source": "setup_check",
             ],
             onSubmission: { result in
-                responseIds[kind] = result.responseId
-                states[kind] = .saved
+                responseIds[kind.id] = result.responseId
+                if let completionKey {
+                    UserDefaults.standard.set(result.responseId, forKey: "\(completionKey).response.\(kind.id)")
+                }
+                states[kind.id] = .saved
                 Task { await verifyDelivery(responseId: result.responseId, kind: kind) }
             }
         )
     }
 
     @MainActor
-    private func verifyDelivery(responseId: String, kind: TestKind) async {
+    private func verifyDelivery(responseId: String, kind: PaydirtSetupCheckForm) async {
         let client = PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
         for _ in 0..<20 {
             do {
                 if let status = try await client.getDeliveryStatus(responseId: responseId) {
-                    states[kind] = status.slackDelivered ? .delivered : .received
-                    if status.slackDelivered || (!requiresSlackDelivery && status.completed) { return }
+                    states[kind.id] = status.slackDelivered && status.completed ? .delivered : (status.completed ? .received : .saved)
+                    if status.completed && (status.slackDelivered || !requiresSlackDelivery) { return }
                 }
             } catch {
                 PaydirtLogger.shared.warning("Setup", "Delivery verification retrying: \(error.localizedDescription)")
             }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
-        states[kind] = .retrying
+        states[kind.id] = .retrying
     }
 }

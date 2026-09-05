@@ -130,6 +130,7 @@ public final class Paydirt: NSObject {
 
     private var apiKey: String?
     private var baseURL: String = "https://api.paydirt.ai"
+    private var cancellationPresentationInFlight: String?
     private var currentUserId: String?
     private var theme: PaydirtTheme = .automatic
     internal var storeKitCancellationMonitor: PaydirtStoreKitCancellationMonitor?
@@ -236,6 +237,15 @@ public final class Paydirt: NSObject {
         )
     }
 
+    /// Verify exactly the forms requested during installation.
+    public static func presentSetupCheck(
+        forms: [PaydirtSetupCheckForm],
+        requiresSlackDelivery: Bool = true,
+        completionKey: String? = nil
+    ) {
+        shared.presentSetupCheck(forms: forms, requiresSlackDelivery: requiresSlackDelivery, completionKey: completionKey)
+    }
+
     /// Route a cancellation from any billing provider into the correct form.
     public static func handleSubscriptionCancellation(
         _ cancellation: PaydirtSubscriptionCancellation,
@@ -306,7 +316,7 @@ public final class Paydirt: NSObject {
         if let theme = theme {
             self.theme = theme
         }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK v2.1.0 configured")
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v2.2.0 configured")
 
         // Retry any pending submissions from previous sessions
         let apiClient = PaydirtAPIClient(apiKey: apiKey, baseURL: self.baseURL)
@@ -474,6 +484,22 @@ public final class Paydirt: NSObject {
         requiresSlackDelivery: Bool = true,
         completionKey: String? = nil
     ) {
+        presentSetupCheck(forms: [
+            PaydirtSetupCheckForm(formId: featureFormId, title: "Suggest a Feature", feedbackType: "feature_request"),
+            PaydirtSetupCheckForm(formId: trialCancellationFormId, title: "Trial Cancellation", feedbackType: "trial_cancellation"),
+            PaydirtSetupCheckForm(formId: subscriptionCancellationFormId, title: "Subscription Cancellation", feedbackType: "subscription_cancellation"),
+        ], requiresSlackDelivery: requiresSlackDelivery, completionKey: completionKey)
+    }
+
+    public func presentSetupCheck(
+        forms: [PaydirtSetupCheckForm],
+        requiresSlackDelivery: Bool = true,
+        completionKey: String? = nil
+    ) {
+        guard !forms.isEmpty, Set(forms.map(\.formId)).count == forms.count else {
+            PaydirtLogger.shared.error("Setup", "Provide a nonempty list of distinct requested forms")
+            return
+        }
         guard let apiKey, let rootViewController = resolveRootViewController() else {
             PaydirtLogger.shared.error("SDK", "Must configure SDK before presenting setup check")
             return
@@ -481,9 +507,7 @@ public final class Paydirt: NSObject {
 
         var hostingController: UIHostingController<AnyView>!
         hostingController = UIHostingController(rootView: AnyView(PaydirtSetupCheckView(
-            featureFormId: featureFormId,
-            trialCancellationFormId: trialCancellationFormId,
-            subscriptionCancellationFormId: subscriptionCancellationFormId,
+            forms: forms,
             requiresSlackDelivery: requiresSlackDelivery,
             completionKey: completionKey,
             apiKey: apiKey,
@@ -549,32 +573,37 @@ public final class Paydirt: NSObject {
         return window.rootViewController
     }
 
+    @discardableResult
     internal func presentCancellationFormOnWindowWithFormId(
         _ formId: String,
         userId: String? = nil,
-        metadata: [String: Any] = ["source": "subscription_cancellation"]
-    ) {
-        guard let rootViewController = resolveRootViewController() else {
-            PaydirtLogger.shared.error("SDK", "Could not find root view controller")
-            return
-        }
-
+        metadata: [String: Any] = ["source": "subscription_cancellation"],
+        onPresented: (() -> Void)? = nil,
+        onDismissed: (() -> Void)? = nil
+    ) -> Bool {
+        guard let apiKey, let root = resolveRootViewController() else { return false }
+        let presenter = topViewController(from: root)
+        guard presenter.viewIfLoaded?.window != nil,
+              !presenter.isBeingPresented, !presenter.isBeingDismissed else { return false }
         var hostingController: UIHostingController<AnyView>!
-        hostingController = UIHostingController(
-            rootView: showForm(
-                formId: formId,
-                userId: userId ?? currentUserId,
-                metadata: metadata,
-                onCompletion: { completed in
-                    hostingController.dismiss(animated: true)
-                    PaydirtLogger.shared.info("SDK", "Cancellation form completed: \(completed)")
-                }
-            )
-        )
-
+        hostingController = UIHostingController(rootView: AnyView(PaydirtFormContainer(
+            formId: formId,
+            userId: userId ?? currentUserId,
+            metadata: metadata,
+            apiKey: apiKey,
+            baseURL: baseURL,
+            theme: theme,
+            onSubmission: nil,
+            onCompletion: { _ in
+                hostingController.dismiss(animated: true)
+                onDismissed?()
+            },
+            onPresented: onPresented
+        )))
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.view.backgroundColor = .clear
-        presentFromRoot(hostingController, rootViewController: rootViewController)
+        presenter.present(hostingController, animated: true)
+        return true
     }
 
     /// Route a provider cancellation into the trial or paid cancellation form.
@@ -583,6 +612,18 @@ public final class Paydirt: NSObject {
         cancellationFormId: String? = nil,
         trialCancellationFormId: String? = nil
     ) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.presentEligibleCancellation(cancellation, cancellationFormId: cancellationFormId, trialCancellationFormId: trialCancellationFormId)
+        }
+    }
+
+    @MainActor
+    private func presentEligibleCancellation(
+        _ cancellation: PaydirtSubscriptionCancellation,
+        cancellationFormId: String?,
+        trialCancellationFormId: String?
+    ) async {
         guard apiKey != nil else {
             PaydirtLogger.shared.error("SDK", "Must configure SDK before handling subscription cancellation")
             return
@@ -600,37 +641,47 @@ public final class Paydirt: NSObject {
             return
         }
 
-        // Claim before asynchronous form lookup so simultaneous provider updates
-        // cannot present duplicate forms. Release the claim when no form exists.
-        markCancellationFormShown(userId: userId, entitlementId: cancellationKey)
+        // Only the in-memory presentation is claimed during lookup/loading.
+        // Persist "shown" only after an enabled form actually appears.
+        guard cancellationPresentationInFlight == nil else { return }
+        cancellationPresentationInFlight = cancellationKey
 
-        Task { @MainActor [weak self] in
-            guard let self = self else { return }
-            let formType = cancellation.isTrial ? "trial_expiration" : "cancellation"
-            let preferredFormId = cancellation.isTrial
-                ? trialCancellationFormId
-                : cancellationFormId
-            let formId = await self.resolveCancellationFormId(preferredFormId, type: formType)
-
-            guard let formId = formId else {
-                self.clearCancellationFormShown(userId: userId, entitlementId: cancellationKey)
-                PaydirtLogger.shared.warning("Subscription", "No enabled \(formType) form is available")
-                return
-            }
-
-            self.presentCancellationFormOnWindowWithFormId(
-                formId,
-                userId: cancellation.userId,
-                metadata: self.subscriptionMetadata(for: cancellation)
-            )
+        let formType = cancellation.isTrial ? "trial_expiration" : "cancellation"
+        let preferredFormId = cancellation.isTrial
+            ? trialCancellationFormId
+            : cancellationFormId
+        let presentingUser = currentUserId
+        let presentingKey = apiKey
+        let formId = await self.resolveCancellationFormId(preferredFormId, type: formType)
+        guard currentUserId == presentingUser, apiKey == presentingKey else {
+            cancellationPresentationInFlight = nil
+            return
         }
+
+        guard let formId = formId else {
+            self.cancellationPresentationInFlight = nil
+            PaydirtLogger.shared.warning("Subscription", "No enabled \(formType) form is available")
+            return
+        }
+
+        let didStart = self.presentCancellationFormOnWindowWithFormId(
+            formId,
+            userId: cancellation.userId,
+            metadata: self.subscriptionMetadata(for: cancellation),
+            onPresented: { [weak self] in
+                self?.markCancellationFormShown(userId: userId, entitlementId: cancellationKey)
+            },
+            onDismissed: { [weak self] in self?.cancellationPresentationInFlight = nil }
+        )
+        if !didStart { self.cancellationPresentationInFlight = nil }
     }
 
     private func resolveCancellationFormId(_ preferredId: String?, type: String) async -> String? {
-        if let preferredId = preferredId { return preferredId }
         guard let apiKey = apiKey else { return nil }
         let client = PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
-        return try? await client.getForm(type: type)?.id
+        guard let form = try? await client.getForm(formId: preferredId, type: preferredId == nil ? type : nil) else { return nil }
+        await FormCache.shared.set(form: form)
+        return form.id
     }
 
     private func subscriptionMetadata(
@@ -644,6 +695,7 @@ public final class Paydirt: NSObject {
             "product_id": cancellation.productId,
             "period_type": cancellation.periodType,
             "will_renew": false,
+            "cancellation_coverage": "sdk_observation",
         ]) { _, requiredValue in requiredValue }
 
         if let value = cancellation.entitlementId {

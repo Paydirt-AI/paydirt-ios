@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.0 — Candidate
+
+- Require explicit Finish before completed feedback; outside/error dismissal abandons and relaunch never promotes drafts.
+- Preserve recordings for retry and retry accepted voice answers without retranscribing or duplicating them.
+- Report local persistence failures and protect newer snapshots from stale retries/acknowledgments.
+- Verify any requested form set, resume delivery checks, and retain the three-form convenience API.
+- Commit cancellation presentation history only once an enabled form appears; prevent repeated RevenueCat startup from forwarding its delegate to itself.
+
+
 All notable public SDK changes are documented here. Versions follow semantic
 versioning.
 

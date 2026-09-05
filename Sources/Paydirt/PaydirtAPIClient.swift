@@ -11,7 +11,13 @@ struct HTTPStatusError: Error {
     let message: String
 }
 
-actor PaydirtAPIClient {
+protocol PaydirtConversationClient: Sendable {
+    func sendMessage(formId: String, message: String, conversationHistory: [ConversationMessage], previousResponseId: String?, appContext: String?) async throws -> FollowUpResponse
+    func submitResponse(submissionId: UUID, formId: String, userId: String?, conversation: [ConversationMessage], metadata: [String: Any]?, status: String, snapshotVersion: Int) async throws
+    func transcribeAudio(audioData: Data) async throws -> String
+}
+
+actor PaydirtAPIClient: PaydirtConversationClient {
     private let apiKey: String
     private let baseURL: String
     private let bundleIdentifier: String?
@@ -24,7 +30,7 @@ actor PaydirtAPIClient {
 
     private func authorize(_ request: inout URLRequest) {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("2.1.0", forHTTPHeaderField: "x-paydirt-sdk-version")
+        request.setValue("2.2.0", forHTTPHeaderField: "x-paydirt-sdk-version")
         if let bundleIdentifier, !bundleIdentifier.isEmpty {
             request.setValue(bundleIdentifier, forHTTPHeaderField: "x-paydirt-bundle-id")
         }
@@ -338,7 +344,7 @@ struct FollowUpResponse: Codable {
     let response_id: String?
 }
 
-struct ConversationMessage: Codable {
+struct ConversationMessage: Codable, Equatable {
     let role: String
     let content: String
     let input_type: String?  // "text" or "audio", nil for assistant messages

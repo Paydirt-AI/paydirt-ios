@@ -17,6 +17,7 @@ struct PaydirtFormContainer: View {
     let theme: PaydirtTheme
     let onSubmission: ((PaydirtSubmissionResult) -> Void)?
     let onCompletion: (Bool) -> Void
+    var onPresented: (() -> Void)? = nil
 
     @State private var form: PaydirtForm?
     @State private var loading = true
@@ -29,11 +30,11 @@ struct PaydirtFormContainer: View {
     var body: some View {
         ZStack {
             if !shouldDismiss {
-                // Background overlay - tap to submit and dismiss
+                // Background overlay - close without completing feedback
                 theme.overlay
                     .ignoresSafeArea()
                     .onTapGesture {
-                        submitAndDismiss()
+                        abandonAndDismiss()
                     }
 
                 VStack(spacing: 20) {
@@ -49,6 +50,7 @@ struct PaydirtFormContainer: View {
                             onCompletion: reportCompletion,
                             onDismiss: dismiss
                         )
+                        .onAppear { onPresented?() }
                     }
                 }
             }
@@ -57,6 +59,10 @@ struct PaydirtFormContainer: View {
         .animation(.easeInOut(duration: 0.3), value: isPresented)
         .task {
             await loadForm()
+        }
+        .onDisappear {
+            if let viewModel { viewModel.abandonFeedback() }
+            else { reportCompletion(false) }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // Preserve accepted turns without treating an interruption as completion.
@@ -113,9 +119,9 @@ struct PaydirtFormContainer: View {
         loading = false
     }
 
-    private func submitAndDismiss() {
+    private func abandonAndDismiss() {
         if let viewModel = viewModel {
-            viewModel.completeFeedback()
+            viewModel.abandonFeedback()
         } else {
             dismiss()
         }
@@ -152,6 +158,7 @@ struct PaydirtCancellationContainer: View {
     let theme: PaydirtTheme
     let onSubmission: ((PaydirtSubmissionResult) -> Void)?
     let onCompletion: (Bool) -> Void
+    var onPresented: (() -> Void)? = nil
 
     @State private var form: PaydirtForm?
     @State private var loading = true
@@ -164,11 +171,11 @@ struct PaydirtCancellationContainer: View {
     var body: some View {
         ZStack {
             if !shouldDismiss {
-                // Background overlay - tap to submit and dismiss
+                // Background overlay - close without completing feedback
                 theme.overlay
                     .ignoresSafeArea()
                     .onTapGesture {
-                        submitAndDismiss()
+                        abandonAndDismiss()
                     }
 
                 VStack(spacing: 20) {
@@ -184,6 +191,7 @@ struct PaydirtCancellationContainer: View {
                             onCompletion: reportCompletion,
                             onDismiss: dismiss
                         )
+                        .onAppear { onPresented?() }
                     }
                 }
             }
@@ -192,6 +200,10 @@ struct PaydirtCancellationContainer: View {
         .animation(.easeInOut(duration: 0.3), value: isPresented)
         .task {
             await loadForm()
+        }
+        .onDisappear {
+            if let viewModel { viewModel.abandonFeedback() }
+            else { reportCompletion(false) }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             // Preserve accepted turns without treating an interruption as completion.
@@ -248,9 +260,9 @@ struct PaydirtCancellationContainer: View {
         loading = false
     }
 
-    private func submitAndDismiss() {
+    private func abandonAndDismiss() {
         if let viewModel = viewModel {
-            viewModel.completeFeedback()
+            viewModel.abandonFeedback()
         } else {
             dismiss()
         }

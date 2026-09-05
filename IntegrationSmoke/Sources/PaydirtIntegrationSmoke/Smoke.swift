@@ -65,6 +65,15 @@ enum PaydirtIntegrationSmoke {
         )
     }
 
+    static func verifyRequestedForms() {
+        Paydirt.presentSetupCheck(forms: [
+            PaydirtSetupCheckForm(formId: "trial-id", title: "Trial Cancellation", feedbackType: "trial_cancellation"),
+            PaydirtSetupCheckForm(formId: "paid-id", title: "Subscription Cancellation", feedbackType: "subscription_cancellation"),
+        ], requiresSlackDelivery: true, completionKey: "fixture.install.verified")
+        // Existing integrations remain source compatible.
+        Paydirt.presentSetupCheck(featureFormId: "feature-id", trialCancellationFormId: "trial-id", subscriptionCancellationFormId: "paid-id")
+    }
+
     static func thirdPartyProviderAdapters() {
         Paydirt.shared.enableRevenueCatIntegration(
             cancellationFormId: "paid-cancellation-form-id",

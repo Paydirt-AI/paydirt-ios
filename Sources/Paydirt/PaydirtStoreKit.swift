@@ -107,6 +107,8 @@ internal final class PaydirtStoreKitCancellationMonitor {
                         case .verified(let renewalInfo) = status.renewalInfo,
                         let expirationDate = transaction.expirationDate,
                         expirationDate > Date(),
+                        transaction.revocationDate == nil,
+                        status.state == .subscribed,
                         !renewalInfo.willAutoRenew
                     else {
                         continue
@@ -135,6 +137,7 @@ internal final class PaydirtStoreKitCancellationMonitor {
                             "original_transaction_id": String(transaction.originalID),
                             "subscription_group_id": subscription.subscriptionGroupID,
                             "store": "app_store",
+                            "cancellation_evidence": "auto_renew_disabled",
                         ]
                     )
 
