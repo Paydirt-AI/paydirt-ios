@@ -20,15 +20,20 @@ private actor StubClient: PaydirtConversationClient {
     var submissionSucceeds = false
     var delayedTranscription: CheckedContinuation<String, Never>?
     var holdTranscription = false
+    var completeInterview = false
 
-    func configure(transcriptionFailures: Int = 0, followUpFailures: Int = 0, holdTranscription: Bool = false) {
+    func configure(transcriptionFailures: Int = 0, followUpFailures: Int = 0, holdTranscription: Bool = false, completeInterview: Bool = false) {
         self.transcriptionFailures = transcriptionFailures
         self.followUpFailures = followUpFailures
         self.holdTranscription = holdTranscription
+        self.completeInterview = completeInterview
     }
     func sendMessage(formId: String, message: String, conversationHistory: [ConversationMessage], previousResponseId: String?, appContext: String?) async throws -> FollowUpResponse {
         followUpCalls += 1
         if followUpFailures > 0 { followUpFailures -= 1; throw URLError(.notConnectedToInternet) }
+        if completeInterview {
+            return FollowUpResponse(follow_up_question: "Thanks, that's everything.", is_complete: true, response_id: "closing")
+        }
         return FollowUpResponse(follow_up_question: "Anything else?", is_complete: false, response_id: "follow-up")
     }
     func submitResponse(submissionId: UUID, formId: String, userId: String?, conversation: [ConversationMessage], metadata: [String: Any]?, status: String, snapshotVersion: Int) async throws {
@@ -237,5 +242,130 @@ final class SubmissionLifecycleTests: XCTestCase {
         XCTAssertFalse(statuses.contains("completed"))
         XCTAssertEqual(memory.store.load().first?.status, "abandoned")
         XCTAssertEqual(callbacks, 0)
+    }
+
+    @MainActor
+    func testCompletingReplyShowsClosingTextThenFinishesOnceViaFinishPath() async {
+        let memory = MemoryQueue(), client = StubClient()
+        await client.configure(completeInterview: true)
+        var submissions = 0, completions = 0
+        let vm = model(memory, client, submitted: { _ in submissions += 1 })
+        vm.onCompletion = { _ in completions += 1 }
+        vm.autoFinishDelayNanoseconds = 600_000_000
+        vm.feedbackText = "Too expensive"
+        vm.processTextFeedback()
+        await waitUntil { !vm.isLoading }
+
+        // Closing text is shown like a question, and the form is still open.
+        XCTAssertEqual(vm.currentQuestion, "Thanks, that's everything.")
+        XCTAssertTrue(vm.isInterviewComplete)
+        XCTAssertEqual(submissions, 0)
+
+        // No further answers or recordings after is_complete.
+        vm.startRecording()
+        XCTAssertFalse(vm.isRecording)
+        vm.feedbackText = "One more thing"
+        vm.processTextFeedback()
+        let followUpCalls = await client.followUpCalls
+        XCTAssertEqual(followUpCalls, 1)
+        vm.feedbackText = ""
+
+        await waitUntil { completions == 1 }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(submissions, 1)
+        XCTAssertEqual(completions, 1)
+        let saved = memory.store.load().first
+        XCTAssertEqual(saved?.status, "completed")
+        XCTAssertEqual(saved?.conversation.last?.content, "Thanks, that's everything.")
+        XCTAssertEqual(saved?.conversation.filter { $0.role == "user" }.count, 1)
+    }
+
+    @MainActor
+    func testManualFinishBeforeAutoFinishCompletesOnce() async {
+        let memory = MemoryQueue(), client = StubClient()
+        await client.configure(completeInterview: true)
+        var submissions = 0, completions = 0
+        let vm = model(memory, client, submitted: { _ in submissions += 1 })
+        vm.onCompletion = { _ in completions += 1 }
+        vm.autoFinishDelayNanoseconds = 300_000_000
+        vm.feedbackText = "Missing a feature"
+        vm.processTextFeedback()
+        await waitUntil { !vm.isLoading }
+        vm.completeFeedback()
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        XCTAssertEqual(submissions, 1)
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(memory.store.load().first?.status, "completed")
+    }
+
+    @MainActor
+    func testDismissDuringThankYouCompletesOnceViaFinishPath() async {
+        let memory = MemoryQueue(), client = StubClient()
+        await client.configure(completeInterview: true)
+        var submissions = 0, completions = 0, dismissals = 0
+        let vm = model(memory, client, submitted: { _ in submissions += 1 })
+        vm.onCompletion = { _ in completions += 1 }
+        vm.onDismiss = { dismissals += 1 }
+        vm.autoFinishDelayNanoseconds = 300_000_000
+        vm.feedbackText = "Not using it"
+        vm.processTextFeedback()
+        await waitUntil { !vm.isLoading }
+        XCTAssertTrue(vm.isInterviewComplete)
+
+        // Outside tap, then the view disappearing, then the auto-finish timer.
+        vm.abandonFeedback()
+        vm.abandonFeedback()
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        XCTAssertEqual(submissions, 1)
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(dismissals, 0)
+        let saved = memory.store.load().first
+        XCTAssertEqual(saved?.status, "completed")
+        XCTAssertEqual(saved?.conversation.last?.content, "Thanks, that's everything.")
+    }
+
+    @MainActor
+    func testDismissDuringThankYouDropsUnacceptedDraft() async {
+        let memory = MemoryQueue(), client = StubClient()
+        await client.configure(completeInterview: true)
+        let vm = model(memory, client)
+        vm.autoFinishDelayNanoseconds = 5_000_000_000
+        vm.feedbackText = "Too expensive"
+        vm.processTextFeedback()
+        await waitUntil { !vm.isLoading }
+        vm.feedbackText = "typed after the closing line"
+        vm.abandonFeedback()
+        let saved = memory.store.load().first
+        XCTAssertEqual(saved?.status, "completed")
+        XCTAssertEqual(saved?.conversation.filter { $0.role == "user" }.map(\.content), ["Too expensive"])
+    }
+
+    @MainActor
+    func testDismissBeforeInterviewCompleteStillAbandons() async {
+        let memory = MemoryQueue(), client = StubClient()
+        var submissions = 0
+        let vm = model(memory, client, submitted: { _ in submissions += 1 })
+        vm.feedbackText = "Not using it"
+        vm.processTextFeedback()
+        await waitUntil { !vm.isLoading }
+        XCTAssertFalse(vm.isInterviewComplete)
+        vm.abandonFeedback()
+        XCTAssertEqual(submissions, 0)
+        XCTAssertEqual(memory.store.load().first?.status, "abandoned")
+    }
+
+    @MainActor
+    func testIncompleteReplyDoesNotAutoFinish() async {
+        let memory = MemoryQueue(), client = StubClient()
+        var submissions = 0
+        let vm = model(memory, client, submitted: { _ in submissions += 1 })
+        vm.autoFinishDelayNanoseconds = 100_000_000
+        vm.feedbackText = "Too expensive"
+        vm.processTextFeedback()
+        await waitUntil { !vm.isLoading }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertFalse(vm.isInterviewComplete)
+        XCTAssertEqual(vm.currentQuestion, "Anything else?")
+        XCTAssertEqual(submissions, 0)
     }
 }

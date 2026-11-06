@@ -59,7 +59,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.2.0")
+    .package(url: "https://github.com/Paydirt-AI/paydirt-ios", from: "2.3.0")
 ]
 ```
 
@@ -204,6 +204,31 @@ All providers attach a common `subscription` metadata object containing the
 provider, feedback type, product, trial/paid period, price when available,
 billing period, entitlement/group, user, and expiration. Trial cancellations
 route to the trial form; paid cancellations route to the subscription form.
+
+### Paydirt decides when to ask
+
+Starting with 2.3.0, the SDK asks Paydirt before it presents a cancellation
+form, so the rules can change without an app update. Paydirt does not ask
+when:
+
+- the product is a promotional grant (for example `rc_promo_*`);
+- the cancellation was detected more than 14 days ago, so old cancellations
+  picked up on the next launch are not asked months later;
+- the same cancellation was already asked of the same user, on any device or
+  after a reinstall;
+- the app has no enabled form of the needed type.
+
+Paydirt records every decision, including skips, so you can see how many
+detected cancellations were shown a form. Once the form appears, the SDK
+reports it so the cancellation counts as asked, and each response carries
+`subscription.paydirt_decision_id`. If the request fails, the SDK
+presents nothing. Against an older Paydirt server, the SDK uses its previous
+form lookup.
+
+The form also closes itself when the interview is done: the closing line
+appears like any question, then the response is completed and delivered
+about 1.8 seconds later, exactly as if the user tapped Finish. Dismissing
+the form during the closing line also completes it.
 
 ## In-app placement
 

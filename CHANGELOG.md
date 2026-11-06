@@ -1,6 +1,12 @@
 # Changelog
 
-## 2.2.0 — Candidate
+## 2.3.0 — Candidate
+
+- Ask Paydirt before presenting a cancellation form (`POST /api/cancellations/decide`). The server skips promotional grants, cancellations detected more than 14 days ago, cancellations already asked of the same user on any device, and apps without an enabled form, and it records every decision.
+- Remember `already_asked`, `promotional` and `stale` skips on the device so the same cancellation is not sent again.
+- Report when a decided form actually appears (`POST /api/cancellations/decisions/{id}/presented`), fire-and-forget; a failed report never blocks or dismisses the form. Responses carry `subscription.paydirt_decision_id` to join them to their decision.
+- Fall back to the 2.2 form lookup when the server does not support decisions (404). Network errors present nothing, as before.
+- Close the form on its own when the interview is done: the closing line shows like a question, then the form finishes after about 1.8 seconds through the same path as Finish. No recording or new answers after the closing line. Dismissing or tapping outside during the closing line completes the response instead of abandoning it. No visual changes.
 
 - Require explicit Finish before completed feedback; outside/error dismissal abandons and relaunch never promotes drafts.
 - Preserve recordings for retry and retry accepted voice answers without retranscribing or duplicating them.
