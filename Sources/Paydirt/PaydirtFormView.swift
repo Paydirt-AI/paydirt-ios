@@ -369,6 +369,11 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     private var recordingURL: URL?
     private var lastAction: (() async -> Void)? = nil  // Store last action for retry
     private var isFinalized = false
+    /// Set when the API reports `is_complete`; no further answers are accepted.
+    private(set) var isInterviewComplete = false
+    private var autoFinishTask: Task<Void, Never>?
+    /// Time the closing text stays visible before the form finishes itself.
+    var autoFinishDelayNanoseconds: UInt64 = 1_800_000_000
     private let onSubmission: ((PaydirtSubmissionResult) -> Void)?
 
     var onCompletion: (([ConversationMessage]) -> Void)?
@@ -445,7 +450,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
     func processTextFeedback() {
         let feedback = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !isFinalized, !isLoading, !feedback.isEmpty else { return }
+        guard !isFinalized, !isInterviewComplete, !isLoading, !feedback.isEmpty else { return }
 
         feedbackText = ""
         conversation.append(ConversationMessage(role: "user", content: feedback, input_type: "text"))
@@ -494,6 +499,10 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
             previousResponseId = response.response_id
 
             PaydirtLogger.shared.info("Form", "Response: is_complete=\(response.is_complete), follow_up=\(response.follow_up_question ?? "nil")")
+            if response.is_complete {
+                isInterviewComplete = true
+                lastAction = nil
+            }
 
             // Do not add late AI output after the user has already closed the form.
             if !isFinalized, let followUp = response.follow_up_question {
@@ -506,6 +515,11 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
             // Clear error state on success
             networkError = nil
+
+            // The closing text is shown like a question; then finish exactly as Finish does.
+            if response.is_complete {
+                scheduleAutoFinish()
+            }
         } catch {
             guard !isFinalized, !Task.isCancelled else { return }
             PaydirtLogger.shared.error("Form", "Failed to process feedback: \(error)")
@@ -517,7 +531,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     }
 
     func startRecording() {
-        guard !isFinalized, !isLoading, networkError == nil else { return }
+        guard !isFinalized, !isInterviewComplete, !isLoading, networkError == nil else { return }
         let session = AVAudioSession.sharedInstance()
 
         switch session.recordPermission {
@@ -539,7 +553,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
     }
 
     private func beginRecording() {
-        guard !isFinalized, !isLoading else { return }
+        guard !isFinalized, !isInterviewComplete, !isLoading else { return }
         cancelRecording()
         do {
             let session = AVAudioSession.sharedInstance()
@@ -601,7 +615,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
     /// Separate entry point also used by lifecycle tests with protected fixtures.
     func processRecording(at url: URL) {
-        guard !isFinalized, !isLoading else { return }
+        guard !isFinalized, !isInterviewComplete, !isLoading else { return }
         recordingURL = url
         isLoading = true
         titleOpacity = 0.3
@@ -675,6 +689,7 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         }
         isFinalized = true
         activeTask?.cancel()
+        autoFinishTask?.cancel()
         lastAction = nil
         cancelRecording()
         onSubmission?(PaydirtSubmissionResult(
@@ -720,6 +735,18 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
         onCompletion?(conversation)
     }
 
+    /// Finish through the same path as the user's Finish tap. `completeFeedback`
+    /// is guarded by `isFinalized`, so a manual Finish or dismissal first wins.
+    private func scheduleAutoFinish() {
+        guard autoFinishTask == nil else { return }
+        let delay = autoFinishDelayNanoseconds
+        autoFinishTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard let self, !Task.isCancelled, !self.isFinalized else { return }
+            self.completeFeedback()
+        }
+    }
+
     /// Checkpoint accepted turns when the app is interrupted. This deliberately
     /// does not finalize the response, so Slack still receives only one message
     /// after an explicit Finish action.
@@ -751,8 +778,17 @@ class PaydirtFormViewModel: NSObject, ObservableObject {
 
     func abandonFeedback() {
         guard !isFinalized else { return }
+        // Leaving during the closing thank-you still counts as a finished interview.
+        // An unaccepted editor draft is dropped, as on any dismissal.
+        if isInterviewComplete, hasSubmittedResponse {
+            feedbackText = ""
+            completeFeedback()
+            // A failed local save leaves the form open; fall back to abandoning it.
+            if isFinalized { return }
+        }
         isFinalized = true
         activeTask?.cancel()
+        autoFinishTask?.cancel()
         lastAction = nil
         feedbackText = ""
         cancelRecording()

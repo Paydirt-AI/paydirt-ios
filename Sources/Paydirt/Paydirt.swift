@@ -316,7 +316,7 @@ public final class Paydirt: NSObject {
         if let theme = theme {
             self.theme = theme
         }
-        PaydirtLogger.shared.info("SDK", "Paydirt SDK v2.2.0 configured")
+        PaydirtLogger.shared.info("SDK", "Paydirt SDK v2.3.0 configured")
 
         // Retry any pending submissions from previous sessions
         let apiClient = PaydirtAPIClient(apiKey: apiKey, baseURL: self.baseURL)
@@ -642,7 +642,8 @@ public final class Paydirt: NSObject {
         }
 
         // Only the in-memory presentation is claimed during lookup/loading.
-        // Persist "shown" only after an enabled form actually appears.
+        // Persist "shown" only after an enabled form actually appears, or when
+        // the server says this cancellation should never be asked.
         guard cancellationPresentationInFlight == nil else { return }
         cancellationPresentationInFlight = cancellationKey
 
@@ -652,7 +653,50 @@ public final class Paydirt: NSObject {
             : cancellationFormId
         let presentingUser = currentUserId
         let presentingKey = apiKey
-        let formId = await self.resolveCancellationFormId(preferredFormId, type: formType)
+
+        // Paydirt decides on the server whether this cancellation should be asked.
+        let decisionRequest = CancellationDecisionRequest(
+            dedupKey: cancellationKey,
+            isTrial: cancellation.isTrial,
+            productId: cancellation.productId,
+            periodType: cancellation.periodType,
+            provider: cancellation.provider.rawValue,
+            userId: cancellation.userId ?? currentUserId,
+            entitlementId: cancellation.entitlementId,
+            detectedAt: cancellation.cancellationDetectedAt,
+            expirationDate: cancellation.expirationDate,
+            preferredFormId: preferredFormId
+        )
+        let decision: Result<CancellationDecisionOutcome, Error>
+        do {
+            guard let presentingKey else { throw PaydirtError.notConfigured }
+            let client = PaydirtAPIClient(apiKey: presentingKey, baseURL: baseURL)
+            decision = .success(try await client.decideCancellation(decisionRequest))
+        } catch {
+            decision = .failure(error)
+        }
+        guard currentUserId == presentingUser, apiKey == presentingKey else {
+            cancellationPresentationInFlight = nil
+            return
+        }
+
+        let formId: String?
+        var decisionId: String?
+        switch Self.cancellationPromptRoute(for: decision) {
+        case .skip(let reason, let rememberLocally):
+            PaydirtLogger.shared.debug("Subscription", "Paydirt skipped cancellation form for \(cancellation.productId): \(reason)")
+            if rememberLocally {
+                markCancellationFormShown(userId: userId, entitlementId: cancellationKey)
+            }
+            cancellationPresentationInFlight = nil
+            return
+        case .present(let decidedFormId, let decidedId):
+            decisionId = decidedId
+            formId = await self.resolveCancellationFormId(decidedFormId, type: formType)
+        case .legacyLookup:
+            PaydirtLogger.shared.debug("Subscription", "Server predates cancellation decisions; using local form lookup")
+            formId = await self.resolveCancellationFormId(preferredFormId, type: formType)
+        }
         guard currentUserId == presentingUser, apiKey == presentingKey else {
             cancellationPresentationInFlight = nil
             return
@@ -667,13 +711,62 @@ public final class Paydirt: NSObject {
         let didStart = self.presentCancellationFormOnWindowWithFormId(
             formId,
             userId: cancellation.userId,
-            metadata: self.subscriptionMetadata(for: cancellation),
+            metadata: self.subscriptionMetadata(for: cancellation, decisionId: decisionId),
             onPresented: { [weak self] in
                 self?.markCancellationFormShown(userId: userId, entitlementId: cancellationKey)
+                if let decisionId, let presentingKey {
+                    self?.reportCancellationPresented(decisionId: decisionId, apiKey: presentingKey)
+                }
             },
             onDismissed: { [weak self] in self?.cancellationPresentationInFlight = nil }
         )
         if !didStart { self.cancellationPresentationInFlight = nil }
+    }
+
+    /// Fire-and-forget: the form is already on screen, so a failure is only logged.
+    private func reportCancellationPresented(decisionId: String, apiKey: String) {
+        let client = PaydirtAPIClient(apiKey: apiKey, baseURL: baseURL)
+        Task {
+            do {
+                try await client.markCancellationDecisionPresented(decisionId: decisionId)
+            } catch {
+                PaydirtLogger.shared.warning("Subscription", "Could not report cancellation form presentation: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    enum CancellationPromptRoute: Equatable {
+        case present(formId: String, decisionId: String?)
+        case skip(reason: String, rememberLocally: Bool)
+        /// Older server without the decide endpoint: use the pre-2.3 form lookup.
+        case legacyLookup
+    }
+
+    /// Server skip reasons that are final for this cancellation, so the device stops asking.
+    static let locallyRememberedSkipReasons: Set<String> = ["already_asked", "promotional", "stale"]
+
+    /// Map the decide call's outcome to what the SDK does. Errors fail closed.
+    static func cancellationPromptRoute(
+        for decision: Result<CancellationDecisionOutcome, Error>
+    ) -> CancellationPromptRoute {
+        switch decision {
+        case .failure(let error):
+            PaydirtLogger.shared.warning("Subscription", "Cancellation decision failed: \(error.localizedDescription)")
+            return .skip(reason: "decision_unavailable", rememberLocally: false)
+        case .success(.unsupported):
+            return .legacyLookup
+        case .success(.decided(let decision)):
+            if decision.show {
+                guard let formId = decision.formId, !formId.isEmpty else {
+                    return .skip(reason: "missing_form_id", rememberLocally: false)
+                }
+                return .present(formId: formId, decisionId: decision.decisionId)
+            }
+            return .skip(
+                reason: decision.reason,
+                rememberLocally: locallyRememberedSkipReasons.contains(decision.reason)
+            )
+        }
     }
 
     private func resolveCancellationFormId(_ preferredId: String?, type: String) async -> String? {
@@ -684,8 +777,9 @@ public final class Paydirt: NSObject {
         return form.id
     }
 
-    private func subscriptionMetadata(
-        for cancellation: PaydirtSubscriptionCancellation
+    func subscriptionMetadata(
+        for cancellation: PaydirtSubscriptionCancellation,
+        decisionId: String? = nil
     ) -> [String: Any] {
         let isoFormatter = ISO8601DateFormatter()
         var subscription = cancellation.additionalMetadata
@@ -721,6 +815,10 @@ public final class Paydirt: NSObject {
         }
         if let value = cancellation.cancellationDetectedAt {
             subscription["cancellation_detected_at"] = isoFormatter.string(from: value)
+        }
+        // Joins this response to its row in Paydirt's cancellation decisions.
+        if let decisionId {
+            subscription["paydirt_decision_id"] = decisionId
         }
 
         return [

@@ -30,7 +30,7 @@ actor PaydirtAPIClient: PaydirtConversationClient {
 
     private func authorize(_ request: inout URLRequest) {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("2.2.0", forHTTPHeaderField: "x-paydirt-sdk-version")
+        request.setValue("2.3.0", forHTTPHeaderField: "x-paydirt-sdk-version")
         if let bundleIdentifier, !bundleIdentifier.isEmpty {
             request.setValue(bundleIdentifier, forHTTPHeaderField: "x-paydirt-bundle-id")
         }
@@ -139,6 +139,66 @@ actor PaydirtAPIClient: PaydirtConversationClient {
 
         let result = try JSONDecoder().decode(FormResponse.self, from: data)
         return result.form
+    }
+
+    /// Ask Paydirt whether a detected cancellation should show a form.
+    /// Returns `.unsupported` when the server predates cancellation decisions (404).
+    /// Network failures and other statuses throw so callers can fail closed.
+    func decideCancellation(_ decisionRequest: CancellationDecisionRequest) async throws -> CancellationDecisionOutcome {
+        guard let url = URL(string: "\(baseURL)/api/cancellations/decide") else {
+            throw PaydirtError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        authorize(&request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        request.httpBody = try JSONSerialization.data(withJSONObject: decisionRequest.jsonObject)
+
+        let (data, httpResponse) = try await withRetry {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw PaydirtError.apiError("Failed to decide cancellation prompt")
+            }
+            // Throw retryable status codes so withRetry can handle them
+            if httpResponse.statusCode == 503 || httpResponse.statusCode == 429 {
+                throw HTTPStatusError(statusCode: httpResponse.statusCode, message: "Server temporarily unavailable")
+            }
+            return (data, httpResponse)
+        }
+
+        if httpResponse.statusCode == 404 {
+            return .unsupported
+        }
+        guard httpResponse.statusCode == 200 else {
+            throw HTTPStatusError(statusCode: httpResponse.statusCode, message: "Failed to decide cancellation prompt")
+        }
+        return .decided(try JSONDecoder().decode(CancellationDecision.self, from: data))
+    }
+
+    /// Tell Paydirt a decided cancellation form actually appeared, so it counts as asked.
+    /// Idempotent on the server; callers treat failures as non-fatal.
+    func markCancellationDecisionPresented(decisionId: String) async throws {
+        guard let encodedId = decisionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "\(baseURL)/api/cancellations/decisions/\(encodedId)/presented") else {
+            throw PaydirtError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        authorize(&request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+        request.httpBody = Data("{}".utf8)
+
+        try await withRetry {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw PaydirtError.apiError("Failed to report cancellation presentation")
+            }
+            guard httpResponse.statusCode == 200 else {
+                throw HTTPStatusError(statusCode: httpResponse.statusCode, message: "Failed to report cancellation presentation")
+            }
+        }
     }
 
     /// Send a message and get follow-up question
@@ -342,6 +402,57 @@ struct FollowUpResponse: Codable {
     let follow_up_question: String?
     let is_complete: Bool
     let response_id: String?
+}
+
+/// Body for `POST /api/cancellations/decide`. Nil fields are omitted.
+struct CancellationDecisionRequest {
+    let dedupKey: String
+    let isTrial: Bool
+    let productId: String
+    let periodType: String
+    let provider: String
+    let userId: String?
+    let entitlementId: String?
+    let detectedAt: Date?
+    let expirationDate: Date?
+    let preferredFormId: String?
+
+    var jsonObject: [String: Any] {
+        let isoFormatter = ISO8601DateFormatter()
+        var body: [String: Any] = [
+            "dedup_key": dedupKey,
+            "is_trial": isTrial,
+            "product_id": productId,
+            "period_type": periodType,
+            "provider": provider,
+        ]
+        if let userId { body["user_id"] = userId }
+        if let entitlementId { body["entitlement_id"] = entitlementId }
+        if let detectedAt { body["detected_at"] = isoFormatter.string(from: detectedAt) }
+        if let expirationDate { body["expiration_date"] = isoFormatter.string(from: expirationDate) }
+        if let preferredFormId { body["preferred_form_id"] = preferredFormId }
+        return body
+    }
+}
+
+struct CancellationDecision: Decodable, Equatable {
+    let show: Bool
+    let reason: String
+    let formId: String?
+    let decisionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case show
+        case reason
+        case formId = "form_id"
+        case decisionId = "decision_id"
+    }
+}
+
+enum CancellationDecisionOutcome: Equatable {
+    case decided(CancellationDecision)
+    /// The server does not have the decide endpoint (404).
+    case unsupported
 }
 
 struct ConversationMessage: Codable, Equatable {
